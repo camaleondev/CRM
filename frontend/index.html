@@ -34,6 +34,8 @@
                             class="nav-text">Inventario</span></a></li>
                 <li><a href="#" class="nav-item" data-target="orders-view">📋 <span class="nav-text">Órdenes</span></a>
                 </li>
+                <li><a href="#" class="nav-item admin-only" data-target="users-view">🔐 <span
+                            class="nav-text">Usuarios</span></a></li>
             </ul>
 
             <div class="user-profile">
@@ -140,6 +142,34 @@
                 </header>
                 <div class="orders-list" id="orders-list">
                     <!-- Populated dynamically via JS -->
+                </div>
+            </section>
+
+            <!-- Users & Roles View (Admin Only) -->
+            <section id="users-view" class="view">
+                <header class="view-header">
+                    <div class="header-titling">
+                        <h1>🔐 Gestión de Usuarios y Roles</h1>
+                        <p>Controla usuarios y asigna roles (Admin/Técnico).</p>
+                    </div>
+                    <button class="btn-primary" onclick="openNewUserModal()">➕ Crear Usuario</button>
+                </header>
+                <div class="table-container">
+                    <table class="glass-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Usuario</th>
+                                <th>Email</th>
+                                <th>Rol</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
@@ -281,6 +311,57 @@
             <div id="detail-content" class="detail-content">
                 <!-- Content injected via JS -->
             </div>
+        </div>
+    </div>
+
+    <!-- Modal: Crear Nuevo Usuario -->
+    <div class="modal-overlay" id="user-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('user-modal')">✖️</button>
+            <h2 id="user-modal-title">Crear Nuevo Usuario 👤</h2>
+            <form id="form-user">
+                <div class="form-group">
+                    <label>Nombre de Usuario</label>
+                    <input type="text" id="user-username" required placeholder="Ej: juan_perez">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="user-email" required placeholder="juan@tecnoservicio.com">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="user-password" required placeholder="Mínimo 6 caracteres">
+                </div>
+                <div class="form-group">
+                    <label>Rol</label>
+                    <select id="user-role" required>
+                        <option value="technician">👷 Técnico</option>
+                        <option value="admin">👨‍💼 Administrador</option>
+                    </select>
+                </div>
+                <button id="user-modal-btn" type="submit" class="btn-primary w-100">Crear Usuario 💾</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Cambiar Rol de Usuario -->
+    <div class="modal-overlay" id="change-role-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('change-role-modal')">✖️</button>
+            <h2>Cambiar Rol de Usuario 🔄</h2>
+            <form id="form-change-role">
+                <div class="form-group">
+                    <label id="change-role-user-label">Usuario: --</label>
+                </div>
+                <div class="form-group">
+                    <label>Nuevo Rol</label>
+                    <select id="change-role-select" required>
+                        <option value="technician">👷 Técnico</option>
+                        <option value="admin">👨‍💼 Administrador</option>
+                    </select>
+                </div>
+                <button id="change-role-btn" type="submit" class="btn-primary w-100">Cambiar Rol 🔄</button>
+            </form>
         </div>
     </div>
 

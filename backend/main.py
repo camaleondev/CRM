@@ -2,15 +2,44 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import timedelta
 
 import models
 import schemas
 from database import engine, get_db
+from auth import (
+    authenticate_user, 
+    create_access_token, 
+    get_current_user, 
+    get_current_admin_user,
+    hash_password,
+    ACCESS_TOKEN_EXPIRE_MINUTES
+)
 
 # Crea las tablas si no existen
 models.Base.metadata.create_all(bind=engine)
 
+# Crear usuario admin por defecto
+def create_default_admin(db: Session):
+    admin = db.query(models.User).filter(models.User.username == "admin").first()
+    if not admin:
+        admin_user = models.User(
+            username="admin",
+            email="admin@crm.local",
+            hashed_password=hash_password("admin123"),
+            role=models.UserRole.admin
+        )
+        db.add(admin_user)
+        db.commit()
+
+db = next(get_db())
+create_default_admin(db)
+
 app = FastAPI(title="CRM Tech Service API 🚀")
+
+@app.get("/")
+def read_root():
+    return {"message": "CRM Tech Service API. Abre http://127.0.0.1:8000/docs para probar los endpoints."}
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,10 +49,79 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- AUTENTICACION ---
+
+@app.post("/login", response_model=schemas.Token)
+def login(username: str, password: str, db: Session = Depends(get_db)):
+    user = authenticate_user(db, username, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
+
+@app.post("/register", response_model=schemas.UserOut)
+def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    # Verificar si el usuario ya existe
+    db_user = db.query(models.User).filter(models.User.username == user.username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="El usuario ya existe")
+    
+    # Crear nuevo usuario como técnico por defecto
+    new_user = models.User(
+        username=user.username,
+        email=user.email,
+        hashed_password=hash_password(user.password),
+        role=models.UserRole.technician
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+@app.post("/users/{user_id}/role", response_model=schemas.UserOut)
+def change_user_role(
+    user_id: int, 
+    new_role: schemas.UserRole, 
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    user.role = new_role.role
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.get("/me", response_model=schemas.UserOut)
+def get_current_user_info(current_user: models.User = Depends(get_current_user)):
+    return current_user
+
+@app.get("/users/", response_model=List[schemas.UserOut])
+def list_users(
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.User).all()
+
+
 # --- CLIENTES ---
 
 @app.post("/clients/", response_model=schemas.ClientOut)
-def create_client(client: schemas.ClientCreate, db: Session = Depends(get_db)):
+def create_client(
+    client: schemas.ClientCreate, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     db_client = models.Client(**client.model_dump())
     db.add(db_client)
     db.commit()
@@ -31,11 +129,21 @@ def create_client(client: schemas.ClientCreate, db: Session = Depends(get_db)):
     return db_client
 
 @app.get("/clients/", response_model=List[schemas.ClientOut])
-def read_clients(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def read_clients(
+    skip: int = 0, 
+    limit: int = 100,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     return db.query(models.Client).offset(skip).limit(limit).all()
 
 @app.put("/clients/{client_id}", response_model=schemas.ClientOut)
-def update_client(client_id: int, client: schemas.ClientCreate, db: Session = Depends(get_db)):
+def update_client(
+    client_id: int, 
+    client: schemas.ClientCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     db_client = db.query(models.Client).filter(models.Client.id == client_id).first()
     if not db_client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -50,7 +158,11 @@ def update_client(client_id: int, client: schemas.ClientCreate, db: Session = De
     return db_client
 
 @app.delete("/clients/{client_id}")
-def delete_client(client_id: int, db: Session = Depends(get_db)):
+def delete_client(
+    client_id: int,
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
     db_client = db.query(models.Client).filter(models.Client.id == client_id).first()
     if not db_client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -61,7 +173,11 @@ def delete_client(client_id: int, db: Session = Depends(get_db)):
 # --- INVENTARIO ---
 
 @app.post("/inventory/", response_model=schemas.InventoryItemOut)
-def create_inventory_item(item: schemas.InventoryItemCreate, db: Session = Depends(get_db)):
+def create_inventory_item(
+    item: schemas.InventoryItemCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     db_item = models.InventoryItem(**item.model_dump())
     db.add(db_item)
     db.commit()
@@ -69,11 +185,21 @@ def create_inventory_item(item: schemas.InventoryItemCreate, db: Session = Depen
     return db_item
 
 @app.get("/inventory/", response_model=List[schemas.InventoryItemOut])
-def read_inventory(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def read_inventory(
+    skip: int = 0, 
+    limit: int = 100,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     return db.query(models.InventoryItem).offset(skip).limit(limit).all()
 
 @app.put("/inventory/{item_id}", response_model=schemas.InventoryItemOut)
-def update_inventory_item(item_id: int, item: schemas.InventoryItemCreate, db: Session = Depends(get_db)):
+def update_inventory_item(
+    item_id: int, 
+    item: schemas.InventoryItemCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     db_item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item no encontrado")
@@ -89,7 +215,11 @@ def update_inventory_item(item_id: int, item: schemas.InventoryItemCreate, db: S
     return db_item
 
 @app.delete("/inventory/{item_id}")
-def delete_inventory_item(item_id: int, db: Session = Depends(get_db)):
+def delete_inventory_item(
+    item_id: int,
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
     db_item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -100,7 +230,11 @@ def delete_inventory_item(item_id: int, db: Session = Depends(get_db)):
 # --- ÓRDENES DE SERVICIO ---
 
 @app.post("/orders/", response_model=schemas.ServiceOrderOut)
-def create_order(order: schemas.ServiceOrderCreate, db: Session = Depends(get_db)):
+def create_order(
+    order: schemas.ServiceOrderCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     # Validar Cliente
     db_client = db.query(models.Client).filter(models.Client.id == order.client_id).first()
     if not db_client:
@@ -143,11 +277,21 @@ def create_order(order: schemas.ServiceOrderCreate, db: Session = Depends(get_db
     return db_order
 
 @app.get("/orders/", response_model=List[schemas.ServiceOrderOut])
-def read_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def read_orders(
+    skip: int = 0, 
+    limit: int = 100,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     return db.query(models.ServiceOrder).offset(skip).limit(limit).all()
 
 @app.put("/orders/{order_id}", response_model=schemas.ServiceOrderOut)
-def update_order(order_id: int, order: schemas.ServiceOrderCreate, db: Session = Depends(get_db)):
+def update_order(
+    order_id: int, 
+    order: schemas.ServiceOrderCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -201,21 +345,22 @@ def update_order(order_id: int, order: schemas.ServiceOrderCreate, db: Session =
     db.refresh(db_order)
     return db_order
 
-@app.put("/orders/{order_id}/status", response_model=schemas.ServiceOrderOut)
-def update_order_status(order_id: int, status: models.OrderStatus, db: Session = Depends(get_db)):
-    db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
-    if not db_order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    db_order.status = status
-    db.commit()
-    db.refresh(db_order)
-    return db_order
-
 @app.delete("/orders/{order_id}")
-def delete_order(order_id: int, db: Session = Depends(get_db)):
+def delete_order(
+    order_id: int,
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
     db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Devolver stock antes de eliminar
+    for item in db_order.items:
+        inv_item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item.item_id).first()
+        if inv_item:
+            inv_item.stock += item.quantity
+    
     db.delete(db_order)
     db.commit()
     return {"ok": True}

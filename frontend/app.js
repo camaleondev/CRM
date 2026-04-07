@@ -604,3 +604,263 @@ async function deleteOrder(id) {
     await fetch(`${API_BASE_URL}/orders/${id}`, { method: 'DELETE' });
     fetchOrders();
 }
+
+// --- AUTENTICACIÓN Y USUARIOS ---
+let currentUser = null;
+let currentToken = null;
+
+// Guardar y recuperar token del localStorage
+function saveToken(token, user) {
+    currentToken = token;
+    currentUser = user;
+    localStorage.setItem('auth_token', token);
+    localStorage.setItem('auth_user', JSON.stringify(user));
+    updateUIForUserRole();
+}
+
+function loadToken() {
+    const token = localStorage.getItem('auth_token');
+    const user = localStorage.getItem('auth_user');
+    if (token && user) {
+        currentToken = token;
+        currentUser = JSON.parse(user);
+        updateUIForUserRole();
+        return true;
+    }
+    return false;
+}
+
+function logout() {
+    currentToken = null;
+    currentUser = null;
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    location.reload();
+}
+
+// Actualizar UI según rol del usuario
+function updateUIForUserRole() {
+    const adminOnlyElements = document.querySelectorAll('.admin-only');
+    const userNameEl = document.querySelector('.user-info .name');
+    const userRoleEl = document.querySelector('.user-info .role');
+    
+    if (currentUser) {
+        if (userNameEl) userNameEl.innerText = currentUser.username;
+        if (userRoleEl) {
+            userRoleEl.innerText = currentUser.role === 'admin' ? 'Administrador' : 'Técnico';
+        }
+        
+        // Mostrar/ocultar elementos según rol
+        adminOnlyElements.forEach(el => {
+            el.style.display = currentUser.role === 'admin' ? 'list-item' : 'none';
+        });
+    }
+}
+
+async function handleLogin(username, password) {
+    try {
+        const res = await fetch(`${API_BASE_URL}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `username=${username}&password=${password}`
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            saveToken(data.access_token, data.user);
+            return true;
+        } else {
+            alert('Usuario o contraseña incorrectos');
+            return false;
+        }
+    } catch (e) {
+        console.error(e);
+        alert('Error al conectar con el servidor');
+        return false;
+    }
+}
+
+// Headers con autenticación
+function getAuthHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+    return headers;
+}
+
+// Sobreescribir fetch para incluir token automáticamente
+const originalFetch = fetch;
+window.fetch = function(...args) {
+    // Solo agregar autenticación a requests internos
+    if (args[0].startsWith(API_BASE_URL) && args[1]) {
+        if (!args[1].headers) args[1].headers = {};
+        if (currentToken && !args[1].headers.Authorization) {
+            args[1].headers.Authorization = `Bearer ${currentToken}`;
+        }
+    }
+    return originalFetch.apply(this, args);
+};
+
+// --- GESTIÓN DE USUARIOS ---
+let globalUsers = [];
+let currentEditUserId = null;
+
+async function fetchUsers() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/users/`, {
+            headers: getAuthHeaders()
+        });
+        if (!res.ok) throw new Error('Error al obtener usuarios');
+        
+        globalUsers = await res.json();
+        const tbody = document.getElementById('users-table-body');
+        tbody.innerHTML = '';
+        
+        globalUsers.forEach(user => {
+            const tr = document.createElement('tr');
+            const roleDisplay = user.role === 'admin' ? '👨‍💼 Administrador' : '👷 Técnico';
+            tr.innerHTML = `
+                <td>${user.id}</td>
+                <td><strong>${user.username}</strong></td>
+                <td>${user.email}</td>
+                <td>${roleDisplay}</td>
+                <td>${user.is_active ? '✅ Activo' : '❌ Inactivo'}</td>
+                <td>
+                    <button class="btn-secondary btn-small" onclick="openChangeRoleModal(${user.id}, '${user.username}', '${user.role}')">🔄 Cambiar Rol</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        console.error('Error cargando usuarios:', e);
+        alert('Error al cargar usuarios');
+    }
+}
+
+window.openNewUserModal = function() {
+    currentEditUserId = null;
+    document.getElementById('form-user').reset();
+    document.getElementById('user-modal-title').innerText = "Crear Nuevo Usuario 👤";
+    document.getElementById('user-modal-btn').innerText = "Crear Usuario 💾";
+    openModal('user-modal');
+}
+
+window.openChangeRoleModal = function(userId, username, currentRole) {
+    currentEditUserId = userId;
+    document.getElementById('change-role-user-label').innerText = `Usuario: ${username}`;
+    document.getElementById('change-role-select').value = currentRole;
+    openModal('change-role-modal');
+}
+
+async function handleUserSubmit(e) {
+    e.preventDefault();
+    const payload = {
+        username: document.getElementById('user-username').value,
+        email: document.getElementById('user-email').value,
+        password: document.getElementById('user-password').value
+    };
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/register`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            closeModal('user-modal');
+            document.getElementById('form-user').reset();
+            fetchUsers();
+            alert('✅ Usuario creado exitosamente');
+        } else {
+            const error = await res.json();
+            alert(`❌ Error: ${error.detail || 'No se pudo crear el usuario'}`);
+        }
+    } catch (e) { 
+        console.error(e);
+        alert('Error al crear usuario');
+    }
+}
+
+async function handleChangeRoleSubmit(e) {
+    e.preventDefault();
+    const newRole = document.getElementById('change-role-select').value;
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/users/${currentEditUserId}/role`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ role: newRole })
+        });
+
+        if (res.ok) {
+            closeModal('change-role-modal');
+            fetchUsers();
+            alert('✅ Rol actualizado exitosamente');
+        } else {
+            const error = await res.json();
+            alert(`❌ Error: ${error.detail || 'No se pudo cambiar el rol'}`);
+        }
+    } catch (e) { 
+        console.error(e);
+        alert('Error al cambiar rol');
+    }
+}
+
+// Inicialización con autenticación
+document.addEventListener('DOMContentLoaded', () => {
+    // Cargar token al iniciar
+    if (loadToken()) {
+        // Si hay token, cargar datos normalmente
+        document.getElementById('form-client').addEventListener('submit', handleClientSubmit);
+        document.getElementById('form-inventory').addEventListener('submit', handleInventorySubmit);
+        document.getElementById('form-order').addEventListener('submit', handleOrderSubmit);
+        document.getElementById('form-user').addEventListener('submit', handleUserSubmit);
+        document.getElementById('form-change-role').addEventListener('submit', handleChangeRoleSubmit);
+        
+        updateDashboard();
+        setInterval(() => { updateDashboard(); }, 3000);
+    } else {
+        // Si no hay token, mostrar login
+        showLoginScreen();
+    }
+});
+
+function showLoginScreen() {
+    const appContent = document.getElementById('app-content');
+    appContent.innerHTML = `
+        <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+            <div class="glass-card" style="width: 100%; max-width: 400px; padding: 2rem;">
+                <h2 style="text-align: center; margin-bottom: 2rem;">🔐 Iniciar Sesión</h2>
+                <form id="login-form" onsubmit="handleLoginSubmit(event)">
+                    <div class="form-group">
+                        <label>Usuario</label>
+                        <input type="text" id="login-username" required placeholder="admin" />
+                    </div>
+                    <div class="form-group">
+                        <label>Contraseña</label>
+                        <input type="password" id="login-password" required placeholder="admin123" />
+                    </div>
+                    <button type="submit" class="btn-primary w-100">Ingresar 🚀</button>
+                </form>
+                <p style="text-align: center; margin-top: 1rem; color: var(--text-secondary); font-size: 0.85rem;">
+                    ℹ️ Credenciales por defecto: admin / admin123
+                </p>
+            </div>
+        </div>
+    `;
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        handleLoginForm();
+    });
+}
+
+async function handleLoginForm() {
+    const username = document.getElementById('login-username').value;
+    const password = document.getElementById('login-password').value;
+    
+    if (await handleLogin(username, password)) {
+        location.reload();
+    }
+}

@@ -1,12 +1,27 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, Enum, Boolean, DateTime
 from sqlalchemy.orm import relationship
 import enum
 from database import Base
+from datetime import datetime
+
+class UserRole(str, enum.Enum):
+    admin = "admin"
+    technician = "technician"
 
 class OrderStatus(str, enum.Enum):
     pending = "Pendiente ⏳"
     in_progress = "En Progreso 🛠️"
     completed = "Completado ✅"
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), unique=True, index=True)
+    email = Column(String(100), unique=True, index=True)
+    hashed_password = Column(String(255))
+    role = Column(Enum(UserRole), default=UserRole.technician)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Client(Base):
     __tablename__ = "clients"
