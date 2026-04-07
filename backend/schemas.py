@@ -18,6 +18,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    role: Optional[UserRoleEnum] = UserRoleEnum.technician
 
 class UserRole(BaseModel):
     username: str
@@ -30,6 +31,10 @@ class UserOut(UserBase):
     created_at: datetime
     class Config:
         from_attributes = True
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
 
 class Token(BaseModel):
     access_token: str

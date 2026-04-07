@@ -38,11 +38,12 @@
                             class="nav-text">Usuarios</span></a></li>
             </ul>
 
-            <div class="user-profile">
+            <div class="user-profile" onclick="goToView('profile-view')" style="cursor: pointer;">
                 <div class="avatar">👨‍💻</div>
                 <div class="user-info">
                     <p class="name">Admin</p>
                     <p class="role">Técnico Principal</p>
+                    <button class="logout-btn" onclick="event.stopPropagation(); logout();">🚪 Cerrar Sesión</button>
                 </div>
             </div>
         </nav>
@@ -124,7 +125,7 @@
                         <h1>📦 Inventario de Repuestos</h1>
                         <p>Control de stock y componentes disponibles.</p>
                     </div>
-                    <button class="btn-primary" onclick="openNewInventory()">➕ Nueva Pieza</button>
+                    <button id="btn-new-inventory" class="btn-primary admin-only-btn" onclick="openNewInventory()" style="display: none;">➕ Nueva Pieza</button>
                 </header>
                 <div class="inventory-grid" id="inventory-grid">
                     <!-- Cards populated dynamically via JS -->
@@ -170,6 +171,43 @@
                             <!-- Populated dynamically via JS -->
                         </tbody>
                     </table>
+                </div>
+            </section>
+
+            <section id="profile-view" class="view">
+                <header class="view-header">
+                    <div class="header-titling">
+                        <h1>👤 Mi Perfil</h1>
+                        <p>Configura tu cuenta y cambia tu contraseña.</p>
+                    </div>
+                </header>
+                <div class="profile-container">
+                    <div class="profile-card glass-card">
+                        <h2>Información del Usuario</h2>
+                        <div class="profile-info">
+                            <p><strong>Usuario:</strong> <span id="profile-username"></span></p>
+                            <p><strong>Email:</strong> <span id="profile-email"></span></p>
+                            <p><strong>Rol:</strong> <span id="profile-role"></span></p>
+                        </div>
+                    </div>
+                    <div class="profile-card glass-card">
+                        <h2>Cambiar Contraseña</h2>
+                        <form id="change-password-form">
+                            <div class="form-group">
+                                <label>Contraseña Actual</label>
+                                <input type="password" id="current-password" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Nueva Contraseña</label>
+                                <input type="password" id="new-password" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Confirmar Nueva Contraseña</label>
+                                <input type="password" id="confirm-password" required>
+                            </div>
+                            <button type="submit" class="btn-primary">Cambiar Contraseña</button>
+                        </form>
+                    </div>
                 </div>
             </section>
 

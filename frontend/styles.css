@@ -191,6 +191,25 @@ body.dark-theme {
   color: var(--text-secondary);
 }
 
+.logout-btn {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple));
+  border: none;
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.logout-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(246, 79, 89, 0.4);
+}
+
 /* Main Content */
 .main-content {
   flex: 1;
@@ -662,4 +681,77 @@ select option {
   color: var(--status-completed);
   padding-top: 1rem;
   border-top: 1px solid var(--glass-border);
+}
+
+/* Profile Styles */
+.profile-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.profile-card {
+  padding: 2rem;
+  border-radius: 16px;
+}
+
+.profile-card h2 {
+  margin-bottom: 1.5rem;
+  color: var(--accent-cyan);
+  font-size: 1.4rem;
+}
+
+.profile-info p {
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.profile-info strong {
+  color: var(--text-secondary);
+}
+
+#change-password-form .form-group {
+  margin-bottom: 1.5rem;
+}
+
+#change-password-form label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+#change-password-form input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+#change-password-form input:focus {
+  outline: none;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.2);
+}
+
+#change-password-form .btn-primary {
+  width: 100%;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  border: none;
+  border-radius: 8px;
+  color: var(--bg-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+#change-password-form .btn-primary:hover {
+  transform: translateY(-2px);
 }

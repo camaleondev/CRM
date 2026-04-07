@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('form-client').addEventListener('submit', handleClientSubmit);
     document.getElementById('form-inventory').addEventListener('submit', handleInventorySubmit);
     document.getElementById('form-order').addEventListener('submit', handleOrderSubmit);
+    document.getElementById('change-password-form').addEventListener('submit', handlePasswordChange);
 
     // Initial data load for dashboard
     updateDashboard();
@@ -49,6 +50,7 @@ window.goToView = function(targetId) {
     else if (targetId === 'inventory-view') fetchInventory();
     else if (targetId === 'orders-view') fetchOrders();
     else if (targetId === 'dashboard-view') updateDashboard();
+    else if (targetId === 'profile-view') fetchProfile();
 }
 
 // Modals
@@ -81,9 +83,15 @@ window.openNewClient = function() {
 // --- Dashboard ---
 async function updateDashboard() {
     try {
-        const clientsRes = await fetch(`${API_BASE_URL}/clients/`);
-        const inventoryRes = await fetch(`${API_BASE_URL}/inventory/`);
-        const ordersRes = await fetch(`${API_BASE_URL}/orders/`);
+        const clientsRes = await fetch(`${API_BASE_URL}/clients/`, {
+            headers: getAuthHeaders()
+        });
+        const inventoryRes = await fetch(`${API_BASE_URL}/inventory/`, {
+            headers: getAuthHeaders()
+        });
+        const ordersRes = await fetch(`${API_BASE_URL}/orders/`, {
+            headers: getAuthHeaders()
+        });
 
         const clients = await clientsRes.json();
         const inventory = await inventoryRes.json();
@@ -102,13 +110,66 @@ async function updateDashboard() {
     }
 }
 
+// --- Profile ---
+async function fetchProfile() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/me`, {
+            headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        const user = await res.json();
+        
+        document.getElementById('profile-username').innerText = user.username;
+        document.getElementById('profile-email').innerText = user.email;
+        document.getElementById('profile-role').innerText = user.role === 'admin' ? 'Administrador' : 'Técnico';
+    } catch (e) {
+        console.error("Error loading profile", e);
+    }
+}
+
+async function handlePasswordChange(e) {
+    e.preventDefault();
+    
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+    
+    if (newPassword !== confirmPassword) {
+        alert('Las contraseñas nuevas no coinciden');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE_URL}/me/password`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+        
+        if (res.ok) {
+            alert('Contraseña cambiada exitosamente');
+            document.getElementById('change-password-form').reset();
+        } else {
+            const error = await res.json();
+            alert('Error: ' + error.detail);
+        }
+    } catch (e) {
+        console.error(e);
+        alert('Error al cambiar la contraseña');
+    }
+}
+
 // --- Clients ---
 let globalClients = [];
 let currentEditClientId = null;
 
 async function fetchClients() {
     try {
-        const res = await fetch(`${API_BASE_URL}/clients/`);
+        const res = await fetch(`${API_BASE_URL}/clients/`, {
+            headers: getAuthHeaders()
+        });
         globalClients = await res.json();
         const tbody = document.getElementById('clients-table-body');
         tbody.innerHTML = '';
@@ -121,8 +182,8 @@ async function fetchClients() {
                 <td>${client.phone || '-'}</td>
                 <td>${client.email}</td>
                 <td>
-                    <button class="btn-secondary btn-small" onclick="openEditClient(${client.id})">✏️</button>
-                    <button class="btn-danger btn-small" onclick="deleteClient(${client.id})">🗑️</button>
+                    ${currentUser.role === 'admin' ? `<button class="btn-secondary btn-small" onclick="openEditClient(${client.id})">✏️</button>` : ''}
+                    ${currentUser.role === 'admin' ? `<button class="btn-danger btn-small" onclick="deleteClient(${client.id})">🗑️</button>` : ''}
                 </td>
             `;
             tbody.appendChild(tr);
@@ -146,13 +207,13 @@ async function handleClientSubmit(e) {
         if (currentEditClientId) {
             res = await fetch(`${API_BASE_URL}/clients/${currentEditClientId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         } else {
             res = await fetch(`${API_BASE_URL}/clients/`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         }
@@ -185,7 +246,10 @@ window.openEditClient = function(id) {
 
 async function deleteClient(id) {
     if (!confirm("¿Seguro que deseas eliminar el cliente?")) return;
-    await fetch(`${API_BASE_URL}/clients/${id}`, { method: 'DELETE' });
+    await fetch(`${API_BASE_URL}/clients/${id}`, { 
+        method: 'DELETE',
+        headers: getAuthHeaders()
+    });
     fetchClients();
 }
 
@@ -195,7 +259,9 @@ let currentEditInventoryId = null;
 
 async function fetchInventory() {
     try {
-        const res = await fetch(`${API_BASE_URL}/inventory/`);
+        const res = await fetch(`${API_BASE_URL}/inventory/`, {
+            headers: getAuthHeaders()
+        });
         globalInventory = await res.json();
         const grid = document.getElementById('inventory-grid');
         grid.innerHTML = '';
@@ -212,8 +278,8 @@ async function fetchInventory() {
                 <div class="inv-price">$${item.price.toFixed(2)}</div>
                 <div class="stock-badge ${stockClass}">${stockText}</div>
                 <div style="margin-top: 15px; display: flex; justify-content: center; gap: 8px;">
-                    <button class="btn-secondary btn-small" onclick="openEditInventory(${item.id})">✏️</button>
-                    <button class="btn-danger btn-small" onclick="deleteInventory(${item.id})">🗑️</button>
+                    ${currentUser.role === 'admin' ? `<button class="btn-secondary btn-small" onclick="openEditInventory(${item.id})">✏️</button>` : ''}
+                    ${currentUser.role === 'admin' ? `<button class="btn-danger btn-small" onclick="deleteInventory(${item.id})">🗑️</button>` : ''}
                 </div>
             `;
             grid.appendChild(card);
@@ -238,13 +304,13 @@ async function handleInventorySubmit(e) {
         if (currentEditInventoryId) {
             res = await fetch(`${API_BASE_URL}/inventory/${currentEditInventoryId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         } else {
             res = await fetch(`${API_BASE_URL}/inventory/`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         }
@@ -278,7 +344,10 @@ window.openEditInventory = function(id) {
 
 async function deleteInventory(id) {
     if (!confirm("¿Eliminar pieza de inventario?")) return;
-    await fetch(`${API_BASE_URL}/inventory/${id}`, { method: 'DELETE' });
+    await fetch(`${API_BASE_URL}/inventory/${id}`, { 
+        method: 'DELETE',
+        headers: getAuthHeaders()
+    });
     fetchInventory();
 }
 
@@ -403,7 +472,9 @@ window.updateMaxQty = function(selectElem) {
 
 async function fetchOrders() {
     try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const res = await fetch(`${API_BASE_URL}/orders/`, {
+            headers: getAuthHeaders()
+        });
         globalOrders = await res.json();
         const list = document.getElementById('orders-list');
         list.innerHTML = '';
@@ -426,14 +497,14 @@ async function fetchOrders() {
                 </div>
                 <div style="display:flex; gap: 1rem; align-items:center; flex-wrap:wrap;">
                     <button class="btn-primary btn-small" onclick="viewOrderDetails(${order.id})">🔍 Detalle</button>
-                    <button class="btn-secondary btn-small" onclick="openEditOrder(${order.id})">✏️ Editar</button>
+                    ${currentUser.role === 'admin' ? `<button class="btn-secondary btn-small" onclick="openEditOrder(${order.id})">✏️ Editar</button>` : ''}
                     <div class="order-status">${order.status}</div>
                     <select class="btn-secondary" onchange="updateOrderStatus(${order.id}, this.value)">
                         <option value="Pendiente ⏳" ${order.status.includes('⏳')?'selected':''}>Pendiente</option>
                         <option value="En Progreso 🛠️" ${order.status.includes('🛠️')?'selected':''}>En Progreso</option>
                         <option value="Completado ✅" ${order.status.includes('✅')?'selected':''}>Completado</option>
                     </select>
-                    <button class="btn-danger" onclick="deleteOrder(${order.id})">🗑️</button>
+                    ${currentUser.role === 'admin' ? `<button class="btn-danger" onclick="deleteOrder(${order.id})">🗑️</button>` : ''}
                 </div>
             `;
             list.appendChild(card);
@@ -533,7 +604,10 @@ window.viewOrderDetails = function(id) {
 
 window.updateOrderStatus = async function(id, newStatus) {
     try {
-        await fetch(`${API_BASE_URL}/orders/${id}/status?status=${newStatus}`, { method: 'PUT' });
+        await fetch(`${API_BASE_URL}/orders/${id}/status?status=${newStatus}`, { 
+            method: 'PUT',
+            headers: getAuthHeaders()
+        });
         fetchOrders();
     } catch (e) { console.error(e); }
 }
@@ -571,13 +645,13 @@ async function handleOrderSubmit(e) {
         if (currentEditOrderId) {
             res = await fetch(`${API_BASE_URL}/orders/${currentEditOrderId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         } else {
             res = await fetch(`${API_BASE_URL}/orders/`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
         }
@@ -601,7 +675,10 @@ async function handleOrderSubmit(e) {
 
 async function deleteOrder(id) {
     if (!confirm("¿Eliminar esta orden de reparación?")) return;
-    await fetch(`${API_BASE_URL}/orders/${id}`, { method: 'DELETE' });
+    await fetch(`${API_BASE_URL}/orders/${id}`, { 
+        method: 'DELETE',
+        headers: getAuthHeaders()
+    });
     fetchOrders();
 }
 
@@ -616,6 +693,7 @@ function saveToken(token, user) {
     localStorage.setItem('auth_token', token);
     localStorage.setItem('auth_user', JSON.stringify(user));
     updateUIForUserRole();
+    updateSidebarUserInfo();
 }
 
 function loadToken() {
@@ -625,9 +703,17 @@ function loadToken() {
         currentToken = token;
         currentUser = JSON.parse(user);
         updateUIForUserRole();
+        updateSidebarUserInfo();
         return true;
     }
     return false;
+}
+
+function updateSidebarUserInfo() {
+    if (currentUser) {
+        document.querySelector('.user-profile .name').innerText = currentUser.username;
+        document.querySelector('.user-profile .role').innerText = currentUser.role === 'admin' ? 'Administrador' : 'Técnico';
+    }
 }
 
 function logout() {
@@ -641,6 +727,7 @@ function logout() {
 // Actualizar UI según rol del usuario
 function updateUIForUserRole() {
     const adminOnlyElements = document.querySelectorAll('.admin-only');
+    const adminOnlyBtn = document.querySelectorAll('.admin-only-btn');
     const userNameEl = document.querySelector('.user-info .name');
     const userRoleEl = document.querySelector('.user-info .role');
     
@@ -653,6 +740,11 @@ function updateUIForUserRole() {
         // Mostrar/ocultar elementos según rol
         adminOnlyElements.forEach(el => {
             el.style.display = currentUser.role === 'admin' ? 'list-item' : 'none';
+        });
+        
+        // Mostrar/ocultar botones solo para admin
+        adminOnlyBtn.forEach(el => {
+            el.style.display = currentUser.role === 'admin' ? 'block' : 'none';
         });
     }
 }
@@ -693,7 +785,8 @@ function getAuthHeaders() {
 const originalFetch = fetch;
 window.fetch = function(...args) {
     // Solo agregar autenticación a requests internos
-    if (args[0].startsWith(API_BASE_URL) && args[1]) {
+    if (args[0].startsWith(API_BASE_URL)) {
+        if (!args[1]) args[1] = {};
         if (!args[1].headers) args[1].headers = {};
         if (currentToken && !args[1].headers.Authorization) {
             args[1].headers.Authorization = `Bearer ${currentToken}`;
@@ -758,7 +851,8 @@ async function handleUserSubmit(e) {
     const payload = {
         username: document.getElementById('user-username').value,
         email: document.getElementById('user-email').value,
-        password: document.getElementById('user-password').value
+        password: document.getElementById('user-password').value,
+        role: document.getElementById('user-role').value
     };
 
     try {
@@ -828,6 +922,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function showLoginScreen() {
+    // Hide sidebar for login
+    document.querySelector('.sidebar').style.display = 'none';
+    
     const appContent = document.getElementById('app-content');
     appContent.innerHTML = `
         <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">

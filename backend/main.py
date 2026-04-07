@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
@@ -13,6 +13,7 @@ from auth import (
     get_current_user, 
     get_current_admin_user,
     hash_password,
+    verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
@@ -52,7 +53,7 @@ app.add_middleware(
 # --- AUTENTICACION ---
 
 @app.post("/login", response_model=schemas.Token)
-def login(username: str, password: str, db: Session = Depends(get_db)):
+def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = authenticate_user(db, username, password)
     if not user:
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
@@ -68,18 +69,22 @@ def login(username: str, password: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/register", response_model=schemas.UserOut)
-def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def register(
+    user: schemas.UserCreate, 
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
     # Verificar si el usuario ya existe
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
     if db_user:
         raise HTTPException(status_code=400, detail="El usuario ya existe")
     
-    # Crear nuevo usuario como técnico por defecto
+    # Crear nuevo usuario con el rol especificado
     new_user = models.User(
         username=user.username,
         email=user.email,
         hashed_password=hash_password(user.password),
-        role=models.UserRole.technician
+        role=user.role
     )
     db.add(new_user)
     db.commit()
@@ -105,6 +110,21 @@ def change_user_role(
 @app.get("/me", response_model=schemas.UserOut)
 def get_current_user_info(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+@app.put("/me/password")
+def change_password(
+    password_data: schemas.PasswordChange,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verificar contraseña actual
+    if not verify_password(password_data.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+    
+    # Hash nueva contraseña
+    current_user.hashed_password = hash_password(password_data.new_password)
+    db.commit()
+    return {"message": "Contraseña cambiada exitosamente"}
 
 @app.get("/users/", response_model=List[schemas.UserOut])
 def list_users(
@@ -141,7 +161,7 @@ def read_clients(
 def update_client(
     client_id: int, 
     client: schemas.ClientCreate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     db_client = db.query(models.Client).filter(models.Client.id == client_id).first()
@@ -175,7 +195,7 @@ def delete_client(
 @app.post("/inventory/", response_model=schemas.InventoryItemOut)
 def create_inventory_item(
     item: schemas.InventoryItemCreate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     db_item = models.InventoryItem(**item.model_dump())
@@ -197,7 +217,7 @@ def read_inventory(
 def update_inventory_item(
     item_id: int, 
     item: schemas.InventoryItemCreate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     db_item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
@@ -287,9 +307,9 @@ def read_orders(
 
 @app.put("/orders/{order_id}", response_model=schemas.ServiceOrderOut)
 def update_order(
-    order_id: int, 
+    order_id: int,
     order: schemas.ServiceOrderCreate,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
@@ -345,6 +365,22 @@ def update_order(
     db.refresh(db_order)
     return db_order
 
+@app.put("/orders/{order_id}/status", response_model=schemas.ServiceOrderOut)
+def update_order_status(
+    order_id: int,
+    status: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
+    if not db_order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    db_order.status = status
+    db.commit()
+    db.refresh(db_order)
+    return db_order
+
 @app.delete("/orders/{order_id}")
 def delete_order(
     order_id: int,
@@ -364,3 +400,7 @@ def delete_order(
     db.delete(db_order)
     db.commit()
     return {"ok": True}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
