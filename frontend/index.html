@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📱 CRM Tech Service</title>
+    <meta name="description" content="CRM para la gestión de servicios técnicos, inventarios y clientes">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="dark-theme">
+
+    <!-- Background Elements for Glassmorphism Context -->
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+
+    <div class="app-container glass-panel">
+
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <h2>🛠️ <span class="logo-text">TechFix</span></h2>
+            </div>
+
+            <ul class="nav-links">
+                <li><a href="#" class="nav-item active" data-target="dashboard-view">📊 <span
+                            class="nav-text">Dashboard</span></a></li>
+                <li><a href="#" class="nav-item" data-target="clients-view">👥 <span
+                            class="nav-text">Clientes</span></a></li>
+                <li><a href="#" class="nav-item" data-target="inventory-view">📦 <span
+                            class="nav-text">Inventario</span></a></li>
+                <li><a href="#" class="nav-item" data-target="orders-view">📋 <span class="nav-text">Órdenes</span></a>
+                </li>
+            </ul>
+
+            <div class="user-profile">
+                <div class="avatar">👨‍💻</div>
+                <div class="user-info">
+                    <p class="name">Admin</p>
+                    <p class="role">Técnico Principal</p>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="app-content">
+
+            <!-- Views (only one active at a time) -->
+
+            <!-- Dashboard View -->
+            <section id="dashboard-view" class="view active">
+                <header class="view-header">
+                    <h1>🚀 Resumen General</h1>
+                    <p>Bienvenido de nuevo al panel de control.</p>
+                </header>
+                <div class="stats-grid">
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('clients-view')">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-info">
+                            <h3>Total Clientes</h3>
+                            <p id="stat-clients">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('inventory-view')">
+                        <div class="stat-icon">📦</div>
+                        <div class="stat-info">
+                            <h3>Piezas en Inventario</h3>
+                            <p id="stat-inventory">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('orders-view')">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <h3>Órdenes Completadas</h3>
+                            <p id="stat-completed-orders">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('orders-view')">
+                        <div class="stat-icon">⏳</div>
+                        <div class="stat-info">
+                            <h3>Órdenes Pendientes</h3>
+                            <p id="stat-pending-orders">0</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Clients View -->
+            <section id="clients-view" class="view">
+                <header class="view-header">
+                    <div class="header-titling">
+                        <h1>👥 Directorio de Clientes</h1>
+                        <p>Gestiona la información de tus clientes y contactos.</p>
+                    </div>
+                    <button class="btn-primary" onclick="openNewClient()">➕ Nuevo Cliente</button>
+                </header>
+                <div class="table-container">
+                    <table class="glass-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Nombre</th>
+                                <th>Teléfono</th>
+                                <th>Email</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clients-table-body">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Inventory View -->
+            <section id="inventory-view" class="view">
+                <header class="view-header">
+                    <div class="header-titling">
+                        <h1>📦 Inventario de Repuestos</h1>
+                        <p>Control de stock y componentes disponibles.</p>
+                    </div>
+                    <button class="btn-primary" onclick="openNewInventory()">➕ Nueva Pieza</button>
+                </header>
+                <div class="inventory-grid" id="inventory-grid">
+                    <!-- Cards populated dynamically via JS -->
+                </div>
+            </section>
+
+            <!-- Orders View -->
+            <section id="orders-view" class="view">
+                <header class="view-header">
+                    <div class="header-titling">
+                        <h1>📋 Órdenes de Servicio</h1>
+                        <p>Trabajos en curso y asignación de piezas.</p>
+                    </div>
+                    <button class="btn-primary" onclick="openNewOrder()">➕ Crear Orden</button>
+                </header>
+                <div class="orders-list" id="orders-list">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Modals -->
+
+    <!-- Modal: Nuevo Cliente -->
+    <div class="modal-overlay" id="client-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('client-modal')">✖️</button>
+            <h2 id="client-modal-title">Añadir Nuevo Cliente 👤</h2>
+            <form id="form-client">
+                <div class="form-group">
+                    <label>Nombre Completo</label>
+                    <input type="text" id="client-name" required placeholder="Ej: Juan Pérez">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="client-email" required placeholder="juan@correo.com">
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" id="client-phone" required placeholder="+34 123 456 789">
+                </div>
+                <div class="form-group">
+                    <label>Dirección</label>
+                    <input type="text" id="client-address" placeholder="Calle Falsa 123">
+                </div>
+                <button id="client-modal-btn" type="submit" class="btn-primary w-100">Guardar Cliente 💾</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Nueva Pieza de Inventario -->
+    <div class="modal-overlay" id="inventory-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('inventory-modal')">✖️</button>
+            <h2 id="inventory-modal-title">Añadir Pieza al Stock 🧩</h2>
+            <form id="form-inventory">
+                <div class="form-group-row">
+                    <div class="form-group flex-3">
+                        <label>Nombre de la Pieza</label>
+                        <input type="text" id="inv-name" required placeholder="Ej: Pantalla OLED iPhone 13">
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Emoji</label>
+                        <input type="text" id="inv-emoji" required placeholder="Ej: 📱" maxlength="3"
+                            list="emoji-options">
+                        <datalist id="emoji-options">
+                            <option value="📱">Smartphone</option>
+                            <option value="💻">Laptop</option>
+                            <option value="🖥️">Monitor</option>
+                            <option value="⌨️">Teclado</option>
+                            <option value="🖱️">Mouse</option>
+                            <option value="🔋">Batería</option>
+                            <option value="🔌">Cargador / Cable</option>
+                            <option value="💾">Almacenamiento</option>
+                            <option value="🎧">Auriculares</option>
+                            <option value="🎮">Consola</option>
+                            <option value="🛠️">Herramienta</option>
+                            <option value="⚙️">Componente interno</option>
+                            <option value="🧩">Pieza general</option>
+                            <option value="📷">Cámara</option>
+                        </datalist>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Categoría</label>
+                    <input type="text" id="inv-category" required placeholder="Ej: Pantallas">
+                </div>
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label>Stock</label>
+                        <input type="number" id="inv-stock" required min="0" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Precio Unitario ($)</label>
+                        <input type="number" id="inv-price" required step="0.01" min="0" value="0.00">
+                    </div>
+                </div>
+                <button id="inventory-modal-btn" type="submit" class="btn-primary w-100">Añadir al Inventario
+                    💾</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Nueva Orden de Servicio -->
+    <div class="modal-overlay" id="order-modal">
+        <div class="modal glass-card modal-large">
+            <button class="close-btn" onclick="closeModal('order-modal')">✖️</button>
+            <h2 id="order-modal-title">Crear Orden de Reparación 🔧</h2>
+            <form id="form-order">
+
+                <div class="form-group">
+                    <label>Seleccionar Cliente</label>
+                    <select id="order-client" required>
+                        <option value="">Cargando clientes...</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Dispositivo</label>
+                    <input type="text" id="order-device" required
+                        placeholder="Ej: Laptop Lenovo Thinkpad (El cliente la trajo porque no enciende)">
+                </div>
+
+                <div class="form-group">
+                    <label>Descripción del Problema</label>
+                    <textarea id="order-description" required rows="3" placeholder="Detalles de la falla..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Repuestos a Utilizar (Opcional)</label>
+                    <div class="parts-selector" id="parts-selector-container">
+                        <!-- Botón para añadir una pieza -->
+                        <button type="button" class="btn-secondary btn-small" onclick="addPartRow()">➕ Añadir Pieza al
+                            Presupuesto</button>
+                        <div id="selected-parts-list" class="selected-parts-list"></div>
+                    </div>
+                </div>
+
+                <button id="order-modal-btn" type="submit" class="btn-primary w-100">Crear Orden y Descartar Stock
+                    🛠️</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Detalle de Orden -->
+    <div class="modal-overlay" id="order-detail-modal">
+        <div class="modal glass-card modal-large">
+            <button class="close-btn" onclick="closeModal('order-detail-modal')">✖️</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h2 id="detail-title" style="margin-bottom: 0;">Detalle de la Orden 🧾</h2>
+                <button class="btn-primary btn-small" id="btn-export-pdf" style="margin-right: 30px;">📄 Exportar
+                    PDF</button>
+            </div>
+            <div id="detail-content" class="detail-content">
+                <!-- Content injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- JS Logic -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
