@@ -8,7 +8,7 @@ from datetime import timedelta, datetime, timezone
 
 # Zona horaria local del servidor: Bogotá (UTC-5)
 BOGOTA = timezone(timedelta(hours=-5))
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from io import BytesIO
 import openpyxl
 import os
@@ -75,7 +75,16 @@ app = FastAPI(title="CRM Tech Service API 🚀", docs_url="/api/docs", openapi_u
 # Servir frontend estático (index.html y assets)
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
 if os.path.isdir(frontend_dir):
-    app.mount('/', StaticFiles(directory=frontend_dir, html=True), name='frontend')
+    # Montar los archivos estáticos en /static para no interferir con rutas de la API
+    app.mount('/static', StaticFiles(directory=frontend_dir), name='static')
+
+    # Servir index.html en la raíz
+    @app.get('/', include_in_schema=False)
+    def serve_index():
+        index_path = os.path.join(frontend_dir, 'index.html')
+        if os.path.exists(index_path):
+            return FileResponse(index_path, media_type='text/html')
+        return {"message": "CRM Tech Service API. Abra /api/docs para la documentación."}
 
 
 @app.exception_handler(RequestValidationError)
