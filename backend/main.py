@@ -81,11 +81,13 @@ def _init_db_default_admin():
         print('Warning: No se pudo crear el admin por defecto en startup:', e)
 
 
+app = FastAPI(title="CRM Tech Service API 🚀", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+
+# Inicializar DB en el evento `startup` (decorador colocado después de crear `app`)
 @app.on_event("startup")
 def on_startup():
     _init_db_default_admin()
-
-app = FastAPI(title="CRM Tech Service API 🚀", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 # Servir frontend estático (index.html y assets)
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
