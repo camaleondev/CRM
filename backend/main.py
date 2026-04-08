@@ -38,8 +38,21 @@ from .auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
-# Crea las tablas si no existen
-models.Base.metadata.create_all(bind=engine)
+# Crea las tablas si no existen. En PostgreSQL puede fallar al recrear tipos ENUM
+# ya creados en intentos previos, así que capturamos IntegrityError específico
+# para evitar que el proceso se caiga en arranques posteriores.
+from sqlalchemy.exc import IntegrityError
+
+try:
+    models.Base.metadata.create_all(bind=engine)
+except IntegrityError as ie:
+    err = str(ie).lower()
+    if 'pg_type_typname_nsp_index' in err or 'duplicate key value violates unique constraint' in err:
+        # Loguear y continuar; la DB ya contiene algunos tipos ENUM
+        print('Warning: Ignored IntegrityError during create_all (possible existing ENUMs):', ie)
+    else:
+        # Re-raise otros errores
+        raise
 
 # Crear usuario admin por defecto
 def create_default_admin(db: Session):
