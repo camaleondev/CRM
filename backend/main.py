@@ -70,7 +70,7 @@ def create_default_admin(db: Session):
 db = next(get_db())
 create_default_admin(db)
 
-app = FastAPI(title="CRM Tech Service API 🚀")
+app = FastAPI(title="CRM Tech Service API 🚀", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 # Servir frontend estático (index.html y assets)
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
