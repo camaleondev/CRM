@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import os
 
 # Zona horaria local del servidor: Bogotá (UTC-5)
 BOGOTA = timezone(timedelta(hours=-5))
@@ -13,10 +14,13 @@ from .database import get_db
 from . import models
 from . import schemas
 
-# Configuración
-SECRET_KEY = "tu-clave-secreta-cambiar-en-produccion"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Configuración (leer de variables de entorno en producción)
+SECRET_KEY = os.environ.get("SECRET_KEY", "tu-clave-secreta-cambiar-en-produccion")
+ALGORITHM = os.environ.get("ALGORITHM", "HS256")
+try:
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+except ValueError:
+    ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Contexto para hash de contraseñas (usar PBKDF2 para evitar limitaciones de bcrypt)
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
