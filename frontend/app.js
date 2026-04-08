@@ -106,6 +106,11 @@ window.closeModal = function(id) {
 }
 
 window.openNewInventory = function() {
+    if (!currentUser || currentUser.role !== 'admin') {
+        alert('Solo administradores pueden crear inventario. Inicia sesión con una cuenta admin.');
+        return;
+    }
+
     currentEditInventoryId = null;
     document.getElementById('form-inventory').reset();
     document.getElementById('inventory-modal-title').innerText = "Añadir Pieza al Stock 🧩";
@@ -363,6 +368,10 @@ async function handleInventorySubmit(e) {
         stock: parseInt(document.getElementById('inv-stock').value),
         price: parseFloat(document.getElementById('inv-price').value)
     };
+    if (!currentToken) {
+        alert('Debes iniciar sesión para crear inventario.');
+        return;
+    }
 
     try {
         let res;
@@ -379,15 +388,26 @@ async function handleInventorySubmit(e) {
                 body: JSON.stringify(payload)
             });
         }
-        
+
         if (res.ok) {
             closeModal('inventory-modal');
             document.getElementById('form-inventory').reset();
             currentEditInventoryId = null;
             fetchInventory();
             updateDashboard();
+            alert('✅ Pieza creada correctamente');
+            return;
         }
-    } catch (e) { console.error(e); }
+
+        // Mostrar error detallado del servidor
+        let errorBody = null;
+        try { errorBody = await res.json(); } catch (_) { try { errorBody = await res.text(); } catch (__) { errorBody = null; } }
+        console.error('Inventory create/update failed', res.status, errorBody);
+        alert(`Error al crear/actualizar inventario (status ${res.status}):\n${formatError(errorBody) || res.statusText}`);
+    } catch (e) {
+        console.error('Network error creating inventory', e);
+        alert('Error de red al crear inventario. Revisa la consola del navegador.');
+    }
 }
 
 window.openEditInventory = function(id) {
