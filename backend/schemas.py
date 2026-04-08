@@ -4,7 +4,7 @@ from enum import Enum
 from datetime import datetime
 
 # Importar enums de models pero evitar conflicto de nombres
-from models import OrderStatus
+from .models import OrderStatus
 
 class UserRoleEnum(str, Enum):
     admin = "admin"
@@ -102,5 +102,54 @@ class ServiceOrderOut(ServiceOrderBase):
     id: int
     client: ClientOut
     items: List[OrderItemOut] = []
+    class Config:
+        from_attributes = True
+
+class AccountingEntryTypeEnum(str, Enum):
+    income = "income"
+    expense = "expense"
+
+class PaymentStatusEnum(str, Enum):
+    pending = "Pendiente ⏳"
+    processing = "Procesando 🔄"
+    completed = "Completado ✅"
+    failed = "Fallido ❌"
+
+class PaymentBase(BaseModel):
+    order_id: int
+    amount: float
+    payment_method: Optional[str] = "credit_card"
+
+class PaymentCreate(PaymentBase):
+    pass
+
+class PaymentProcess(BaseModel):
+    """Datos para procesar un pago (solo para tarjeta)"""
+    card_number: Optional[str] = None
+    card_holder: Optional[str] = None
+    expiry: Optional[str] = None
+    cvv: Optional[str] = None
+
+class PaymentOut(PaymentBase):
+    id: int
+    status: PaymentStatusEnum
+    transaction_id: Optional[str] = None
+    paid_at: Optional[datetime] = None
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class AccountingEntryBase(BaseModel):
+    entry_type: AccountingEntryTypeEnum
+    category: str
+    amount: float
+    description: Optional[str] = None
+
+class AccountingEntryCreate(AccountingEntryBase):
+    pass
+
+class AccountingEntryOut(AccountingEntryBase):
+    id: int
+    created_at: datetime
     class Config:
         from_attributes = True

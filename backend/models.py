@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, Enum, Boolean, DateTime
 from sqlalchemy.orm import relationship
 import enum
-from database import Base
+from .database import Base
 from datetime import datetime
 
 class UserRole(str, enum.Enum):
@@ -52,6 +52,7 @@ class ServiceOrder(Base):
 
     client = relationship("Client", back_populates="orders")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="order", cascade="all, delete-orphan")
 
 class OrderItem(Base):
     __tablename__ = "order_items"
@@ -62,3 +63,36 @@ class OrderItem(Base):
 
     order = relationship("ServiceOrder", back_populates="items")
     item = relationship("InventoryItem")
+
+class PaymentStatus(str, enum.Enum):
+    pending = "Pendiente ⏳"
+    processing = "Procesando 🔄"
+    completed = "Completado ✅"
+    failed = "Fallido ❌"
+
+class Payment(Base):
+    __tablename__ = "payments"
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("service_orders.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    status = Column(Enum(PaymentStatus), default=PaymentStatus.pending)
+    payment_method = Column(String(50), default="cash")  # cash or card
+    transaction_id = Column(String(100), nullable=True)  # ID externo de la transacción
+    paid_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    order = relationship("ServiceOrder", back_populates="payments")
+
+class AccountingEntryType(str, enum.Enum):
+    income = "income"
+    expense = "expense"
+
+class AccountingEntry(Base):
+    __tablename__ = "accounting_entries"
+    id = Column(Integer, primary_key=True, index=True)
+    entry_type = Column(Enum(AccountingEntryType), nullable=False)
+    category = Column(String(100), default="General")
+    amount = Column(Float, nullable=False)
+    description = Column(Text, nullable=True)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)  # Link a pago
+    created_at = Column(DateTime, default=datetime.utcnow)

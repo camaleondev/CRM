@@ -34,6 +34,7 @@
                             class="nav-text">Inventario</span></a></li>
                 <li><a href="#" class="nav-item" data-target="orders-view">📋 <span class="nav-text">Órdenes</span></a>
                 </li>
+                <li><a href="#" class="nav-item admin-only" data-target="accounting-view">💼 <span class="nav-text">Contabilidad</span></a></li>
                 <li><a href="#" class="nav-item admin-only" data-target="users-view">🔐 <span
                             class="nav-text">Usuarios</span></a></li>
             </ul>
@@ -88,6 +89,33 @@
                             <p id="stat-pending-orders">0</p>
                         </div>
                     </div>
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('accounting-view')">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-info">
+                            <h3>Ingresos</h3>
+                            <p id="dashboard-income">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('accounting-view')">
+                        <div class="stat-icon">💸</div>
+                        <div class="stat-info">
+                            <h3>Gastos</h3>
+                            <p id="dashboard-expense">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card" style="cursor: pointer;" onclick="goToView('accounting-view')">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-info">
+                            <h3>Utilidad</h3>
+                            <p id="dashboard-profit">$0.00</p>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:0.5rem; align-items:center; margin: 1rem 0;">
+                    <label for="report-month">Mes:</label>
+                    <input type="month" id="report-month" style="height:36px;">
+                    <button class="btn-primary" onclick="generateAccountingReport()">Generar Reporte</button>
+                    <button class="btn-secondary" onclick="exportAccountingReport()">Exportar a Excel</button>
                 </div>
             </section>
 
@@ -143,6 +171,56 @@
                 </header>
                 <div class="orders-list" id="orders-list">
                     <!-- Populated dynamically via JS -->
+                </div>
+            </section>
+
+            <!-- Accounting View (Admin Only) -->
+            <section id="accounting-view" class="view">
+                <header class="view-header">
+                    <div class="header-titling">
+                        <h1>💼 Contabilidad</h1>
+                        <p>Registra ingresos y gastos de la empresa.</p>
+                    </div>
+                    <button class="btn-primary admin-only-btn" onclick="openNewAccountingEntry()">➕ Nuevo Registro</button>
+                </header>
+                <div class="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-info">
+                            <h3>Ingresos</h3>
+                            <p id="stat-income">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon">🧾</div>
+                        <div class="stat-info">
+                            <h3>Gastos</h3>
+                            <p id="stat-expense">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-icon">📈</div>
+                        <div class="stat-info">
+                            <h3>Utilidad</h3>
+                            <p id="stat-profit">$0.00</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="glass-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Tipo</th>
+                                <th>Categoría</th>
+                                <th>Descripción</th>
+                                <th>Monto</th>
+                                <th>Fecha</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="accounting-table-body"></tbody>
+                    </table>
                 </div>
             </section>
 
@@ -337,6 +415,36 @@
         </div>
     </div>
 
+    <!-- Modal: Nueva Entrada de Contabilidad -->
+    <div class="modal-overlay" id="accounting-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('accounting-modal')">✖️</button>
+            <h2 id="accounting-modal-title">Registrar Movimiento Contable 💼</h2>
+            <form id="form-accounting">
+                <div class="form-group">
+                    <label>Tipo de Movimiento</label>
+                    <select id="accounting-type" required>
+                        <option value="income">Ingreso</option>
+                        <option value="expense">Gasto</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Categoría</label>
+                    <input type="text" id="accounting-category" required placeholder="Ej: Servicio, Ventas, Gastos operativos">
+                </div>
+                <div class="form-group">
+                    <label>Monto ($)</label>
+                    <input type="number" id="accounting-amount" required step="0.01" min="0" value="0.00">
+                </div>
+                <div class="form-group">
+                    <label>Descripción</label>
+                    <textarea id="accounting-description" rows="3" placeholder="Comentarios adicionales..."></textarea>
+                </div>
+                <button type="submit" class="btn-primary w-100">Guardar Movimiento 💾</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal: Detalle de Orden -->
     <div class="modal-overlay" id="order-detail-modal">
         <div class="modal glass-card modal-large">
@@ -400,6 +508,40 @@
                 </div>
                 <button id="change-role-btn" type="submit" class="btn-primary w-100">Cambiar Rol 🔄</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: Procesar Pago -->
+    <div class="modal-overlay" id="payment-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('payment-modal')">✖️</button>
+            <h2 id="payment-modal-title">💳 Procesar Pago</h2>
+            <form id="form-payment">
+                <div class="form-group">
+                    <label>Orden de Servicio</label>
+                    <input type="text" id="payment-order-id" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Monto a Pagar</label>
+                    <input type="text" id="payment-amount" readonly>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="payment-card-checkbox" onchange="toggleCardFields()"> Pagar con tarjeta</label>
+                </div>
+                <!-- Nota: campos de tarjeta removidos; la casilla solo indica que fue pago con tarjeta -->
+                <button id="payment-process-btn" type="submit" class="btn-primary w-100">Procesar Pago 💰</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Estado del Pago -->
+    <div class="modal-overlay" id="payment-status-modal">
+        <div class="modal glass-card">
+            <button class="close-btn" onclick="closeModal('payment-status-modal')">✖️</button>
+            <h2 id="payment-status-title">Estado del Pago</h2>
+            <div id="payment-status-content" class="detail-content" style="padding-top: 0;">
+            </div>
+            <button onclick="closeModal('payment-status-modal')" class="btn-primary w-100">Cerrar</button>
         </div>
     </div>
 

@@ -1,13 +1,18 @@
-from fastapi import FastAPI, Depends, HTTPException, Form
+from fastapi import FastAPI, Depends, HTTPException, Form, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import timedelta
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+import openpyxl
 
-import models
-import schemas
-from database import engine, get_db
-from auth import (
+from . import models
+from . import schemas
+from .database import engine, get_db
+from .auth import (
     authenticate_user, 
     create_access_token, 
     get_current_user, 
@@ -37,6 +42,19 @@ db = next(get_db())
 create_default_admin(db)
 
 app = FastAPI(title="CRM Tech Service API 🚀")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Formatear errores de Pydantic para mostrar mensajes legibles en frontend
+    errors = exc.errors()
+    parts = []
+    for err in errors:
+        loc = " -> ".join(str(l) for l in err.get('loc', []))
+        msg = err.get('msg', '')
+        parts.append(f"{loc}: {msg}")
+    detail = "; ".join(parts) if parts else str(exc)
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 @app.get("/")
 def read_root():
@@ -294,6 +312,24 @@ def create_order(
             
     db.commit()
     db.refresh(db_order)
+
+    if db_order.status == models.OrderStatus.completed:
+        total_income = 0.0
+        for order_item in db_order.items:
+            if order_item.item:
+                total_income += order_item.item.price * order_item.quantity
+
+        if total_income > 0:
+            accounting_entry = models.AccountingEntry(
+                entry_type=models.AccountingEntryType.income,
+                category="Orden de servicio",
+                amount=total_income,
+                description=f"Ingreso por orden #{db_order.id} completada"
+            )
+            db.add(accounting_entry)
+            db.commit()
+            db.refresh(accounting_entry)
+
     return db_order
 
 @app.get("/orders/", response_model=List[schemas.ServiceOrderOut])
@@ -305,11 +341,131 @@ def read_orders(
 ):
     return db.query(models.ServiceOrder).offset(skip).limit(limit).all()
 
+@app.post("/accounting/", response_model=schemas.AccountingEntryOut)
+def create_accounting_entry(
+    entry: schemas.AccountingEntryCreate,
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    db_entry = models.AccountingEntry(**entry.model_dump())
+    db.add(db_entry)
+    db.commit()
+    db.refresh(db_entry)
+    return db_entry
+
+@app.get("/accounting/", response_model=List[schemas.AccountingEntryOut])
+def read_accounting_entries(
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.AccountingEntry).order_by(models.AccountingEntry.created_at.desc()).all()
+
+
+@app.get("/accounting/report")
+def accounting_report(year: int, month: int, current_user: models.User = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    """Devuelve los registros contables de un mes y totales."""
+    from datetime import datetime
+    start = datetime(year, month, 1)
+    if month == 12:
+        end = datetime(year + 1, 1, 1)
+    else:
+        end = datetime(year, month + 1, 1)
+
+    entries = db.query(models.AccountingEntry).filter(models.AccountingEntry.created_at >= start, models.AccountingEntry.created_at < end).order_by(models.AccountingEntry.created_at.asc()).all()
+
+    income = sum(e.amount for e in entries if e.entry_type == models.AccountingEntryType.income)
+    expense = sum(e.amount for e in entries if e.entry_type == models.AccountingEntryType.expense)
+    net = income - expense
+
+    entries_out = []
+    for e in entries:
+        pm = None
+        if e.payment_id:
+            p = db.query(models.Payment).filter(models.Payment.id == e.payment_id).first()
+            if p:
+                pm = p.payment_method
+
+        entries_out.append({
+            "id": e.id,
+            "entry_type": e.entry_type,
+            "category": e.category,
+            "description": e.description,
+            "amount": e.amount,
+            "payment_id": e.payment_id,
+            "payment_method": pm,
+            "created_at": e.created_at.isoformat() if e.created_at else None
+        })
+
+    return {
+        "year": year,
+        "month": month,
+        "income": income,
+        "expense": expense,
+        "net": net,
+        "entries": entries_out
+    }
+
+
+@app.get("/accounting/report/{year}/{month}/export")
+def accounting_report_export(year: int, month: int, current_user: models.User = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    """Genera un archivo Excel (.xlsx) con el reporte del mes."""
+    report = accounting_report(year, month, current_user, db)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Reporte_{year}_{month}"
+
+    headers = ["ID", "Tipo", "Categoría", "Descripción", "Monto", "Pago ID", "Método Pago", "Fecha"]
+    ws.append(headers)
+
+    for e in report['entries']:
+        ws.append([
+            e['id'],
+            'Ingreso' if e['entry_type'] == models.AccountingEntryType.income else 'Gasto',
+            e['category'],
+            e['description'] or '',
+            float(e['amount'] or 0.0),
+            e['payment_id'] or '',
+            e.get('payment_method') or '',
+            e['created_at'] or ''
+        ])
+
+    # Totales al final
+    ws.append([])
+    ws.append(["", "Total Ingresos", "", "", float(report['income'])])
+    ws.append(["", "Total Gastos", "", "", float(report['expense'])])
+    ws.append(["", "Neto", "", "", float(report['net'])])
+
+    # Auto-ajustar anchos simples
+    for column_cells in ws.columns:
+        length = max((len(str(cell.value)) for cell in column_cells), default=0)
+        ws.column_dimensions[column_cells[0].column_letter].width = min(50, length + 2)
+
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    filename = f"reporte_contable_{year}_{month}.xlsx"
+    return StreamingResponse(bio, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+@app.delete("/accounting/{entry_id}")
+def delete_accounting_entry(
+    entry_id: int,
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    db_entry = db.query(models.AccountingEntry).filter(models.AccountingEntry.id == entry_id).first()
+    if not db_entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    db.delete(db_entry)
+    db.commit()
+    return {"ok": True}
+
 @app.put("/orders/{order_id}", response_model=schemas.ServiceOrderOut)
 def update_order(
     order_id: int,
     order: schemas.ServiceOrderCreate,
-    current_user: models.User = Depends(get_current_admin_user),
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
@@ -375,10 +531,33 @@ def update_order_status(
     db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
     if not db_order:
         raise HTTPException(status_code=404, detail="Order not found")
+    old_status = db_order.status
+    try:
+        new_status = models.OrderStatus(status)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Estado de orden inválido")
 
-    db_order.status = status
+    db_order.status = new_status
     db.commit()
     db.refresh(db_order)
+
+    if new_status == models.OrderStatus.completed:
+        total_income = 0.0
+        for order_item in db_order.items:
+            if order_item.item:
+                total_income += order_item.item.price * order_item.quantity
+
+        if total_income > 0:
+            accounting_entry = models.AccountingEntry(
+                entry_type=models.AccountingEntryType.income,
+                category="Orden de servicio",
+                amount=total_income,
+                description=f"Ingreso por orden #{db_order.id} completada"
+            )
+            db.add(accounting_entry)
+            db.commit()
+            db.refresh(accounting_entry)
+
     return db_order
 
 @app.delete("/orders/{order_id}")
@@ -387,19 +566,156 @@ def delete_order(
     current_user: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
-    db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
+    try:
+        db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == order_id).first()
+        if not db_order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Devolver stock antes de eliminar
+        for item in db_order.items:
+            inv_item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item.item_id).first()
+            if inv_item:
+                inv_item.stock += item.quantity
+
+        # Al usar cascade en la relación `payments`, SQLAlchemy eliminará
+        # automáticamente los pagos asociados al borrar la orden.
+        db.delete(db_order)
+        db.commit()
+        return {"ok": True}
+    except HTTPException:
+        # Re-raise HTTPExceptions intact
+        raise
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print('ERROR deleting order:', tb)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- PAGOS ---
+
+@app.post("/payments/", response_model=schemas.PaymentOut)
+def create_payment(
+    payment: schemas.PaymentCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Crear un nuevo pago para una orden"""
+    # Validar que la orden existe
+    db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == payment.order_id).first()
     if not db_order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
     
-    # Devolver stock antes de eliminar
-    for item in db_order.items:
-        inv_item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item.item_id).first()
-        if inv_item:
-            inv_item.stock += item.quantity
+    # Validar monto positivo
+    if payment.amount <= 0:
+        raise HTTPException(status_code=400, detail="El monto del pago debe ser mayor a cero")
+
+    # Validar que no haya pagos completados ya
+    existing_payment = db.query(models.Payment).filter(
+        models.Payment.order_id == payment.order_id,
+        models.Payment.status == models.PaymentStatus.completed
+    ).first()
+    if existing_payment:
+        raise HTTPException(status_code=400, detail="Esta orden ya tiene un pago completado")
     
-    db.delete(db_order)
+    # Crear el pago
+    db_payment = models.Payment(
+        order_id=payment.order_id,
+        amount=payment.amount,
+        payment_method=payment.payment_method
+    )
+    db.add(db_payment)
     db.commit()
-    return {"ok": True}
+    db.refresh(db_payment)
+    return db_payment
+
+@app.get("/payments/order/{order_id}", response_model=List[schemas.PaymentOut])
+def get_order_payments(
+    order_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Obtener todos los pagos de una orden"""
+    return db.query(models.Payment).filter(models.Payment.order_id == order_id).all()
+
+@app.post("/payments/{payment_id}/process", response_model=schemas.PaymentOut)
+def process_payment(
+    payment_id: int,
+    payment_data: Optional[schemas.PaymentProcess] = None,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Procesar un pago"""
+    db_payment = db.query(models.Payment).filter(models.Payment.id == payment_id).first()
+    if not db_payment:
+        raise HTTPException(status_code=404, detail="Pago no encontrado")
+    
+    if db_payment.status != models.PaymentStatus.pending:
+        raise HTTPException(status_code=400, detail="Este pago ya fue procesado")
+    
+    from datetime import datetime
+    import random
+    import string
+    
+    if db_payment.payment_method == "cash":
+        # Pago en efectivo - procesar inmediatamente
+        transaction_id = "CASH_" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+        db_payment.status = models.PaymentStatus.completed
+        db_payment.transaction_id = transaction_id
+        db_payment.paid_at = datetime.utcnow()
+        
+    elif db_payment.payment_method == "card":
+        # Pago con tarjeta: no requerimos datos en el frontend (casilla)
+        # Simular procesamiento similar a efectivo pero con prefijo CARD_
+        transaction_id = "CARD_" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+        db_payment.status = models.PaymentStatus.completed
+        db_payment.transaction_id = transaction_id
+        db_payment.paid_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(db_payment)
+    
+    # Crear entrada contable automática
+    accounting_entry = models.AccountingEntry(
+        entry_type=models.AccountingEntryType.income,
+        category="Pago de Orden",
+        amount=db_payment.amount,
+        description=f"Pago {'en efectivo' if db_payment.payment_method == 'cash' else 'con tarjeta'} - Orden #{db_payment.order_id} - TXN: {transaction_id}",
+        payment_id=db_payment.id
+    )
+    db.add(accounting_entry)
+    db.commit()
+    db.refresh(accounting_entry)
+
+    # Si los pagos completados alcanzan o superan el total de la orden, marcarla como completada
+    # Calcular total de la orden (sumatoria precio * cantidad de los items)
+    db_order = db.query(models.ServiceOrder).filter(models.ServiceOrder.id == db_payment.order_id).first()
+    if db_order:
+        order_total = 0.0
+        for oi in db_order.items:
+            if oi.item:
+                order_total += (oi.item.price or 0.0) * (oi.quantity or 0)
+
+        # Sumar todos los pagos completados para esta orden
+        completed_payments = db.query(models.Payment).filter(
+            models.Payment.order_id == db_order.id,
+            models.Payment.status == models.PaymentStatus.completed
+        ).all()
+        paid_total = sum(p.amount or 0.0 for p in completed_payments)
+
+        if paid_total >= order_total and order_total > 0:
+            db_order.status = models.OrderStatus.completed
+            db.commit()
+            db.refresh(db_order)
+    
+    return db_payment
+
+@app.get("/payments/", response_model=List[schemas.PaymentOut])
+def get_all_payments(
+    current_user: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Obtener todos los pagos (admin only)"""
+    return db.query(models.Payment).order_by(models.Payment.created_at.desc()).all()
 
 if __name__ == "__main__":
     import uvicorn

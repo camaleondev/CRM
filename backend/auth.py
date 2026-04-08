@@ -2,21 +2,21 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from passlib.exc import UnknownHashError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from database import get_db
-import models
-import schemas
+from .database import get_db
+from . import models
+from . import schemas
 
 # Configuración
 SECRET_KEY = "tu-clave-secreta-cambiar-en-produccion"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Contexto para hash de contraseñas
-# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
+# Contexto para hash de contraseñas (usar PBKDF2 para evitar limitaciones de bcrypt)
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # Seguridad
 security = HTTPBearer()
@@ -24,13 +24,15 @@ security = HTTPBearer()
 # --- FUNCIONES DE HASH Y VERIFICACION ---
 
 def hash_password(password: str) -> str:
-    # Limitar a 72 bytes (límite de bcrypt)
-    password = password[:72]
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    plain_password = plain_password[:72]
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except UnknownHashError:
+        # Log for debugging: show value and type
+        print('UnknownHashError for stored hash:', repr(hashed_password), 'type:', type(hashed_password))
+        raise
 
 # --- FUNCIONES DE TOKEN JWT ---
 

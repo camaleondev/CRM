@@ -1,7 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from pathlib import Path
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./crm.db"
+# Use an absolute path to the DB file inside the backend package directory
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / 'crm.db'
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}

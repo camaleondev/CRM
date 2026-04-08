@@ -1,5 +1,16 @@
 const API_BASE_URL = 'http://127.0.0.1:8000';
 
+function formatError(err) {
+    if (!err) return 'Ha ocurrido un error.';
+    if (typeof err === 'string') return err;
+    if (err.detail) {
+        if (typeof err.detail === 'string') return err.detail;
+        if (Array.isArray(err.detail)) return err.detail.map(d => (d.msg || JSON.stringify(d))).join('\n');
+        try { return JSON.stringify(err.detail); } catch (e) { return String(err.detail); }
+    }
+    try { return JSON.stringify(err); } catch (e) { return String(err); }
+}
+
 // == UI & Navigation Logic ==
 document.addEventListener('DOMContentLoaded', () => {
     // Nav links setup
@@ -14,10 +25,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Delegated handler for payment buttons (works even for dynamic content)
+    document.addEventListener('click', (e) => {
+        try {
+            if (e.defaultPrevented) return; // respeta handlers que detuvieron la propagación
+            const btn = e.target.closest && e.target.closest('.btn-payment');
+            if (!btn) return;
+            const id = parseInt(btn.getAttribute('data-order-id'));
+            if (isNaN(id)) {
+                console.warn('Pago: order id inválido en botón', btn);
+                return;
+            }
+            console.log('delegated btn-payment click, orderId=', id, btn);
+            openPaymentModal(id);
+        } catch (err) {
+            console.error('Error en handler delegado btn-payment', err);
+        }
+    });
+
     // Forms submission setup
     document.getElementById('form-client').addEventListener('submit', handleClientSubmit);
     document.getElementById('form-inventory').addEventListener('submit', handleInventorySubmit);
     document.getElementById('form-order').addEventListener('submit', handleOrderSubmit);
+    document.getElementById('form-accounting').addEventListener('submit', handleAccountingSubmit);
+    const formPayment = document.getElementById('form-payment');
+    if (formPayment) formPayment.addEventListener('submit', handlePaymentSubmit);
     document.getElementById('change-password-form').addEventListener('submit', handlePasswordChange);
 
     // Initial data load for dashboard
@@ -49,17 +81,25 @@ window.goToView = function(targetId) {
     if (targetId === 'clients-view') fetchClients();
     else if (targetId === 'inventory-view') fetchInventory();
     else if (targetId === 'orders-view') fetchOrders();
+    else if (targetId === 'accounting-view') fetchAccounting();
     else if (targetId === 'dashboard-view') updateDashboard();
     else if (targetId === 'profile-view') fetchProfile();
 }
 
 // Modals
 window.openModal = function(id) {
-    document.getElementById(id).classList.add('active');
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('active');
+    // Forzar display por si la hoja de estilos no aplica correctamente
+    try { el.style.display = 'flex'; } catch (e) {}
 }
 
 window.closeModal = function(id) {
-    document.getElementById(id).classList.remove('active');
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('active');
+    try { el.style.display = 'none'; } catch (e) {}
 }
 
 window.openNewInventory = function() {
@@ -97,7 +137,7 @@ async function updateDashboard() {
         const inventory = await inventoryRes.json();
         const orders = await ordersRes.json();
 
-        document.getElementById('stat-clients').innerText = clients.length || 0;
+    document.getElementById('stat-clients').innerText = clients.length || 0;
         document.getElementById('stat-inventory').innerText = inventory.length || 0;
         
         const completed = orders.filter(o => o.status === 'Completado ✅').length;
@@ -105,6 +145,22 @@ async function updateDashboard() {
 
         document.getElementById('stat-completed-orders').innerText = completed || 0;
         document.getElementById('stat-pending-orders').innerText = pending || 0;
+
+        const accountingRes = await fetch(`${API_BASE_URL}/accounting/`, {
+            headers: getAuthHeaders()
+        });
+        if (accountingRes.ok) {
+            const accounting = await accountingRes.json();
+            let income = 0;
+            let expense = 0;
+            accounting.forEach(entry => {
+                if (entry.entry_type === 'income') income += entry.amount;
+                else if (entry.entry_type === 'expense') expense += entry.amount;
+            });
+            document.getElementById('dashboard-income').innerText = `$${income.toFixed(2)}`;
+            document.getElementById('dashboard-expense').innerText = `$${expense.toFixed(2)}`;
+            document.getElementById('dashboard-profit').innerText = `$${(income - expense).toFixed(2)}`;
+        }
     } catch (e) {
         console.error("Error loading dashboard", e);
     }
@@ -355,6 +411,8 @@ async function deleteInventory(id) {
 let availableItems = [];
 let globalOrders = [];
 let currentEditOrderId = null;
+let currentPaymentOrderId = null;
+let currentOrderDueAmount = 0;
 
 window.openNewOrder = async function() {
     currentEditOrderId = null;
@@ -497,6 +555,7 @@ async function fetchOrders() {
                 </div>
                 <div style="display:flex; gap: 1rem; align-items:center; flex-wrap:wrap;">
                     <button class="btn-primary btn-small" onclick="viewOrderDetails(${order.id})">🔍 Detalle</button>
+                    <button class="btn-secondary btn-small btn-payment" data-order-id="${order.id}">💳 Pago</button>
                     ${currentUser.role === 'admin' ? `<button class="btn-secondary btn-small" onclick="openEditOrder(${order.id})">✏️ Editar</button>` : ''}
                     <div class="order-status">${order.status}</div>
                     <select class="btn-secondary" onchange="updateOrderStatus(${order.id}, this.value)">
@@ -509,12 +568,108 @@ async function fetchOrders() {
             `;
             list.appendChild(card);
         });
+
+        // Attach payment button handlers after rendering
+        document.querySelectorAll('.btn-payment').forEach(btn => {
+            btn.removeEventListener('click', btn._paymentHandler);
+            const handler = (e) => {
+                // Evitar que el delegado también capture este click
+                e.stopPropagation();
+                const id = parseInt(btn.getAttribute('data-order-id'));
+                console.log('attached btn-payment handler invoked, orderId=', id, btn);
+                if (!isNaN(id)) openPaymentModal(id);
+            };
+            btn._paymentHandler = handler;
+            btn.addEventListener('click', handler);
+        });
     } catch (e) {
         console.error(e);
     }
 }
 
-window.viewOrderDetails = function(id) {
+async function fetchAccounting() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/accounting/`, {
+            headers: getAuthHeaders()
+        });
+        const entries = await res.json();
+        const tbody = document.getElementById('accounting-table-body');
+        tbody.innerHTML = '';
+
+        let income = 0;
+        let expense = 0;
+
+        entries.forEach(entry => {
+            const amount = parseFloat(entry.amount || 0);
+            if (entry.entry_type === 'income') income += amount;
+            else if (entry.entry_type === 'expense') expense += amount;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${entry.id}</td>
+                <td>${entry.entry_type === 'income' ? 'Ingreso' : 'Gasto'}</td>
+                <td>${entry.category}</td>
+                <td>${entry.description || '-'}</td>
+                <td>${entry.entry_type === 'income' ? '+' : '-'}$${amount.toFixed(2)}</td>
+                <td>${new Date(entry.created_at).toLocaleString()}</td>
+                <td>${currentUser && currentUser.role === 'admin' ? `<button class="btn-danger btn-small" onclick="deleteAccountingEntry(${entry.id})">🗑️</button>` : ''}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        document.getElementById('stat-income').innerText = `$${income.toFixed(2)}`;
+        document.getElementById('stat-expense').innerText = `$${expense.toFixed(2)}`;
+        document.getElementById('stat-profit').innerText = `$${(income - expense).toFixed(2)}`;
+    } catch (e) {
+        console.error('Error loading accounting', e);
+    }
+}
+
+window.openNewAccountingEntry = function() {
+    document.getElementById('form-accounting').reset();
+    document.getElementById('accounting-modal-title').innerText = 'Registrar Movimiento Contable 💼';
+    openModal('accounting-modal');
+}
+
+async function handleAccountingSubmit(e) {
+    e.preventDefault();
+    const payload = {
+        entry_type: document.getElementById('accounting-type').value,
+        category: document.getElementById('accounting-category').value,
+        amount: parseFloat(document.getElementById('accounting-amount').value),
+        description: document.getElementById('accounting-description').value
+    };
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/accounting/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            closeModal('accounting-modal');
+            fetchAccounting();
+        } else {
+            const errorData = await res.json();
+            alert(`Error al guardar registro contable:\n${formatError(errorData) || 'Ha ocurrido un problema.'}`);
+        }
+    } catch (e) {
+        console.error(e);
+        alert('Error al conectar con la API');
+    }
+}
+
+async function deleteAccountingEntry(id) {
+    if (!confirm('¿Eliminar este registro contable?')) return;
+    await fetch(`${API_BASE_URL}/accounting/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+    });
+    fetchAccounting();
+}
+
+window.viewOrderDetails = async function(id) {
     const order = globalOrders.find(o => o.id === id);
     if (!order) return;
 
@@ -544,6 +699,33 @@ window.viewOrderDetails = function(id) {
 
     document.getElementById('detail-title').innerText = `Orden #${order.id} - ${order.status}`;
     
+    let payments = [];
+    try {
+        const paymentRes = await fetch(`${API_BASE_URL}/payments/order/${order.id}`, { headers: getAuthHeaders() });
+        if (paymentRes.ok) payments = await paymentRes.json();
+    } catch (e) {
+        console.error('Error loading payments for order', e);
+    }
+
+    let paymentsHtml = '<p style="color:var(--text-secondary)">No hay pagos registrados para esta orden.</p>';
+    if (payments.length > 0) {
+        paymentsHtml = `<div class="table-container" style="margin-top: 10px;">
+            <table class="glass-table" style="font-size: 0.9rem;">
+                <thead><tr><th>ID Pago</th><th>Método</th><th>Estado</th><th>Monto</th><th>Transacción</th><th>Fecha</th></tr></thead>
+                <tbody>`;
+        payments.forEach(pay => {
+            paymentsHtml += `<tr>
+                <td>${pay.id}</td>
+                <td>${pay.payment_method.replace('_', ' ')}</td>
+                <td>${pay.status}</td>
+                <td>$${parseFloat(pay.amount).toFixed(2)}</td>
+                <td>${pay.transaction_id || '-'}</td>
+                <td>${pay.paid_at ? new Date(pay.paid_at).toLocaleString() : '-'}</td>
+            </tr>`;
+        });
+        paymentsHtml += '</tbody></table></div>';
+    }
+
     document.getElementById('detail-content').innerHTML = `
         <div class="detail-section">
             <h3>👤 Información del Cliente</h3>
@@ -562,6 +744,10 @@ window.viewOrderDetails = function(id) {
         </div>
         <div class="order-total">
             Total Repuestos: $${totalItemsCost.toFixed(2)}
+        </div>
+        <div class="detail-section">
+            <h3>💳 Pagos</h3>
+            ${paymentsHtml}
         </div>
     `;
 
@@ -619,18 +805,72 @@ async function handleOrderSubmit(e) {
     const device = document.getElementById('order-device').value;
     const description = document.getElementById('order-description').value;
     
+    // Validar cliente
+    if (isNaN(client_id)) {
+        alert('Selecciona un cliente válido antes de guardar.');
+        return;
+    }
+
     // Gather parts
     const partsSelects = document.querySelectorAll('.part-select');
     const partsQtys = document.querySelectorAll('.part-qty');
     const items = [];
     
     for (let i = 0; i < partsSelects.length; i++) {
-        if (partsSelects[i].value) {
-            items.push({
-                item_id: parseInt(partsSelects[i].value),
-                quantity: parseInt(partsQtys[i].value)
-            });
+        const sel = partsSelects[i];
+        const qtyInput = partsQtys[i];
+        if (!sel || !sel.value) continue;
+
+        const rawVal = (sel.value || '').toString().trim();
+        let qtyInt = Number((qtyInput.value || '').toString().trim());
+
+        // Extract item id robustly
+        function extractItemId(selectElem) {
+            const v = (selectElem.value || '').toString().trim();
+            if (/^\d+$/.test(v)) return parseInt(v, 10);
+            // Try dataset on selected option
+            const opt = selectElem.options[selectElem.selectedIndex];
+            if (opt) {
+                const d1 = opt.getAttribute('data-id');
+                if (d1 && /^\d+$/.test(d1)) return parseInt(d1, 10);
+                // Try to match by visible text against availableItems
+                const text = (opt.text || '').toString().trim();
+                if (text) {
+                    const found = availableItems.find(ai => `${ai.emoji} ${ai.name} ($${ai.price}) - Stock: ${ai.stock}` === text || ai.name === text || text.includes(ai.name));
+                    if (found) return found.id;
+                }
+            }
+            // Last resort: extract first number in value
+            const m = v.match(/(\d+)/);
+            if (m) return parseInt(m[1], 10);
+            return NaN;
         }
+
+        const itemId = extractItemId(sel);
+
+        // If no repuesto selected, skip this row (non-blocking)
+        if (!rawVal) {
+            console.debug('Skipping empty part row', i);
+            continue;
+        }
+
+        // Coerce quantity to a positive integer (allow editing even if user typed non-integer)
+        if (!Number.isFinite(qtyInt) || qtyInt <= 0) {
+            qtyInt = 1;
+        } else {
+            qtyInt = Math.max(1, Math.floor(qtyInt));
+        }
+
+        if (!Number.isInteger(itemId) || Number.isNaN(itemId)) {
+            console.warn('Could not determine numeric item_id for part row', i, sel.value, sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].text);
+            // Skip invalid row instead of blocking the whole submit
+            continue;
+        }
+
+        items.push({
+            item_id: itemId,
+            quantity: qtyInt
+        });
     }
 
     const payload = {
@@ -665,7 +905,7 @@ async function handleOrderSubmit(e) {
             updateDashboard();
         } else {
             const errorData = await res.json();
-            alert(`Error al guardar la orden:\n${errorData.detail || "Ha ocurrido un problema desconocido."}`);
+            alert(`Error al guardar la orden:\n${formatError(errorData) || "Ha ocurrido un problema desconocido."}`);
         }
     } catch (e) { 
         console.error(e);
@@ -673,13 +913,140 @@ async function handleOrderSubmit(e) {
     }
 }
 
+window.openPaymentModal = function(orderId) {
+    currentPaymentOrderId = orderId;
+    console.log('openPaymentModal invoked for order', orderId);
+    document.getElementById('form-payment').reset();
+    document.getElementById('payment-modal-title').innerText = `💳 Procesar Pago Orden #${orderId}`;
+    const order = globalOrders.find(o => o.id === orderId);
+    let amountDue = 0;
+    if (order && order.items) {
+        order.items.forEach(item => {
+            const price = item.item ? parseFloat(item.item.price) : 0;
+            amountDue += price * item.quantity;
+        });
+    }
+    currentOrderDueAmount = amountDue;
+    document.getElementById('payment-order-id').value = orderId;
+    document.getElementById('payment-amount').value = `$${amountDue.toFixed(2)}`;
+    toggleCardFields(); // Inicializar visibilidad
+    openModal('payment-modal');
+    console.log('payment-modal opened for order', orderId);
+}
+
+async function handlePaymentSubmit(e) {
+    e.preventDefault();
+    if (!currentPaymentOrderId) {
+        alert('Orden de pago inválida');
+        return;
+    }
+    console.log('handlePaymentSubmit start, orderId=', currentPaymentOrderId);
+
+    const isCard = document.getElementById('payment-card-checkbox').checked;
+    const payload = {
+        order_id: currentPaymentOrderId,
+        amount: currentOrderDueAmount,
+        payment_method: isCard ? 'card' : 'cash'
+    };
+
+    // No se recopilan datos de tarjeta en el frontend — la casilla solo marca el método.
+    // Enviar body vacío al procesar el pago.
+
+    try {
+        const createRes = await fetch(`${API_BASE_URL}/payments/`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+        });
+        console.log('pagos POST response status=', createRes.status);
+        if (!createRes.ok) {
+            let errorText = null;
+            try { errorText = await createRes.json(); } catch (_) { errorText = await createRes.text(); }
+            console.error('error creating payment', errorText);
+            alert(`Error al crear el pago:\n${formatError(errorText) || 'No se pudo crear el pago.'}`);
+            return;
+        }
+
+        const payment = await createRes.json();
+        const processRes = await fetch(`${API_BASE_URL}/payments/${payment.id}/process`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({})
+        });
+        console.log('process POST response status=', processRes.status);
+
+        if (!processRes.ok) {
+            let errorText = null;
+            try { errorText = await processRes.json(); } catch (_) { errorText = await processRes.text(); }
+            console.error('error processing payment', errorText);
+            alert(`Error al procesar el pago:\n${formatError(errorText) || 'La pasarela devolvió un error.'}`);
+            return;
+        }
+
+        const processed = await processRes.json();
+        closeModal('payment-modal');
+        const content = `
+            <p><strong>Pago Procesado con éxito ✅</strong></p>
+            <p><strong>ID Pago:</strong> ${processed.id}</p>
+            <p><strong>Orden:</strong> ${processed.order_id}</p>
+            <p><strong>Monto:</strong> $${parseFloat(processed.amount).toFixed(2)}</p>
+            <p><strong>Estado:</strong> ${processed.status}</p>
+            <p><strong>Transacción:</strong> ${processed.transaction_id || '-'}</p>
+            <p><strong>Fecha:</strong> ${processed.paid_at ? new Date(processed.paid_at).toLocaleString() : '-'}</p>
+        `;
+        document.getElementById('payment-status-content').innerHTML = content;
+        openModal('payment-status-modal');
+        fetchOrders();
+        updateDashboard();
+    } catch (e) {
+        console.error(e);
+        alert('Error al procesar el pago. Intenta nuevamente.');
+    }
+}
+
+window.toggleCardFields = function() {
+    const checkbox = document.getElementById('payment-card-checkbox');
+    const cardFields = document.getElementById('card-fields');
+    if (!cardFields) {
+        // No hay campos de tarjeta en la UI (se eliminaron intencionalmente).
+        // Nada que alternar; evitamos errores por acceso a propiedades de null.
+        return;
+    }
+    const cardInputs = cardFields.querySelectorAll('input');
+    if (checkbox && checkbox.checked) {
+        cardFields.style.display = 'block';
+        cardInputs.forEach(input => input.required = true);
+    } else {
+        cardFields.style.display = 'none';
+        cardInputs.forEach(input => input.required = false);
+    }
+}
+
 async function deleteOrder(id) {
     if (!confirm("¿Eliminar esta orden de reparación?")) return;
-    await fetch(`${API_BASE_URL}/orders/${id}`, { 
-        method: 'DELETE',
-        headers: getAuthHeaders()
-    });
-    fetchOrders();
+    if (!currentToken) {
+        alert('Debes iniciar sesión como administrador para eliminar órdenes.');
+        return;
+    }
+    try {
+        const url = `${API_BASE_URL}/orders/${id}`;
+        const headers = getAuthHeaders();
+        console.log('deleting order', id, url, headers);
+        const res = await fetch(url, { 
+            method: 'DELETE',
+            headers: headers
+        });
+        if (!res.ok) {
+            let data = null;
+            try { data = await res.json(); } catch (_) { data = await res.text(); }
+            alert(`Error al eliminar la orden:\n${formatError(data) || 'Acción no permitida.'}`);
+            return;
+        }
+        fetchOrders();
+    } catch (e) {
+        console.error('Error eliminando orden', e);
+        alert(`Error de red al eliminar la orden: ${e && e.message ? e.message : String(e)}. Revisa consola y Network.`);
+    }
 }
 
 // --- AUTENTICACIÓN Y USUARIOS ---
@@ -713,6 +1080,64 @@ function updateSidebarUserInfo() {
     if (currentUser) {
         document.querySelector('.user-profile .name').innerText = currentUser.username;
         document.querySelector('.user-profile .role').innerText = currentUser.role === 'admin' ? 'Administrador' : 'Técnico';
+    }
+}
+
+// === Contabilidad: generar/exportar reporte mensual ===
+async function generateAccountingReport() {
+    const input = document.getElementById('report-month');
+    if (!input || !input.value) {
+        alert('Selecciona un mes válido (YYYY-MM).');
+        return;
+    }
+    const [year, month] = input.value.split('-').map(Number);
+    try {
+        const res = await fetch(`${API_BASE_URL}/accounting/report?year=${year}&month=${month}`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            const err = await res.text();
+            alert('Error al generar reporte:\n' + err);
+            return;
+        }
+        const data = await res.json();
+        // Calcular desglose por método de pago
+        const entries = data.entries || [];
+        const cardCount = entries.filter(e => e.payment_method === 'card').length;
+        const cashCount = entries.filter(e => e.payment_method === 'cash').length;
+        const otherCount = entries.length - cardCount - cashCount;
+        // Mostrar resumen simple con desglose
+        alert(`Reporte ${year}-${String(month).padStart(2,'0')}\nIngresos: $${data.income.toFixed(2)}\nGastos: $${data.expense.toFixed(2)}\nNeto: $${data.net.toFixed(2)}\nEntradas: ${entries.length}\n- Tarjeta: ${cardCount}\n- Efectivo: ${cashCount}\n- Otro: ${otherCount}`);
+    } catch (e) {
+        console.error('Error generando reporte', e);
+        alert('Error de red al generar el reporte. Revisa la consola.');
+    }
+}
+
+async function exportAccountingReport() {
+    const input = document.getElementById('report-month');
+    if (!input || !input.value) {
+        alert('Selecciona un mes válido (YYYY-MM).');
+        return;
+    }
+    const [year, month] = input.value.split('-').map(Number);
+    try {
+        const res = await fetch(`${API_BASE_URL}/accounting/report/${year}/${month}/export`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            const err = await res.text();
+            alert('Error al exportar reporte:\n' + err);
+            return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `reporte_contable_${year}_${month}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('Error exportando reporte', e);
+        alert('Error de red al exportar el reporte. Revisa la consola.');
     }
 }
 
@@ -795,6 +1220,18 @@ window.fetch = function(...args) {
     return originalFetch.apply(this, args);
 };
 
+// Extra debug binding directo al botón de pago (por si el submit no se propaga)
+document.addEventListener('DOMContentLoaded', () => {
+    const payBtn = document.getElementById('payment-process-btn');
+    if (payBtn) {
+        payBtn.addEventListener('click', (e) => {
+            console.log('DEBUG: click en #payment-process-btn');
+            // Nota: debug visual removido para no interferir con la UX.
+            // El formulario seguirá manejando el submit normalmente.
+        });
+    }
+});
+
 // --- GESTIÓN DE USUARIOS ---
 let globalUsers = [];
 let currentEditUserId = null;
@@ -869,7 +1306,7 @@ async function handleUserSubmit(e) {
             alert('✅ Usuario creado exitosamente');
         } else {
             const error = await res.json();
-            alert(`❌ Error: ${error.detail || 'No se pudo crear el usuario'}`);
+            alert(`❌ Error: ${formatError(error) || 'No se pudo crear el usuario'}`);
         }
     } catch (e) { 
         console.error(e);
@@ -894,7 +1331,7 @@ async function handleChangeRoleSubmit(e) {
             alert('✅ Rol actualizado exitosamente');
         } else {
             const error = await res.json();
-            alert(`❌ Error: ${error.detail || 'No se pudo cambiar el rol'}`);
+            alert(`❌ Error: ${formatError(error) || 'No se pudo cambiar el rol'}`);
         }
     } catch (e) { 
         console.error(e);
