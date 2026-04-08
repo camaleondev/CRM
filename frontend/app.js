@@ -235,6 +235,8 @@ async function fetchClients() {
             tr.innerHTML = `
                 <td>${client.id}</td>
                 <td><strong>${client.name}</strong></td>
+                <td>${client.id_type || '-'}</td>
+                <td>${client.id_number || '-'}</td>
                 <td>${client.phone || '-'}</td>
                 <td>${client.email}</td>
                 <td>
@@ -255,7 +257,9 @@ async function handleClientSubmit(e) {
         name: document.getElementById('client-name').value,
         email: document.getElementById('client-email').value,
         phone: document.getElementById('client-phone').value,
-        address: document.getElementById('client-address').value
+        address: document.getElementById('client-address').value,
+        id_type: document.getElementById('client-id-type').value || null,
+        id_number: document.getElementById('client-id-number').value || null
     };
 
     try {
@@ -293,6 +297,8 @@ window.openEditClient = function(id) {
     document.getElementById('client-email').value = client.email;
     document.getElementById('client-phone').value = client.phone || '';
     document.getElementById('client-address').value = client.address || '';
+    document.getElementById('client-id-type').value = client.id_type || '';
+    document.getElementById('client-id-number').value = client.id_number || '';
 
     document.getElementById('client-modal-title').innerText = "Editar Cliente 👤";
     document.getElementById('client-modal-btn').innerText = "Guardar Cambios 💾";
@@ -732,6 +738,7 @@ window.viewOrderDetails = async function(id) {
             <p><strong>Nombre:</strong> ${order.client.name}</p>
             <p><strong>Email:</strong> ${order.client.email}</p>
             <p><strong>Tel/Dir:</strong> ${order.client.phone || 'N/D'} | ${order.client.address || 'N/D'}</p>
+            <p><strong>Documento:</strong> ${order.client.id_type ? (order.client.id_type + ' - ' + (order.client.id_number || '')) : 'N/D'}</p>
         </div>
         <div class="detail-section">
             <h3>📱 Detalles del Dispositivo</h3>
@@ -757,34 +764,85 @@ window.viewOrderDetails = async function(id) {
     document.getElementById('btn-export-pdf').onclick = function() {
         const sourceElement = document.getElementById('detail-content');
         
-        // Crear contenedor temporal para garantizar el fondo oscuro en el PDF
-        // dado que originariamente se usaban fondos transparentes/glassmorphism
+        // Crear contenedor temporal para el PDF (fondo claro)
         const pdfContainer = document.createElement('div');
         pdfContainer.style.padding = '30px';
-        pdfContainer.style.backgroundColor = '#0f1016';
-        pdfContainer.style.color = '#ffffff';
+        pdfContainer.style.backgroundColor = '#ffffff';
+        pdfContainer.style.color = '#111111';
         pdfContainer.style.fontFamily = 'Outfit, sans-serif';
+
+        // Estilos inline para el PDF: texto negro y títulos en colores
+        const pdfInlineStyles = `
+            <style>
+                /* Usar Courier New para el PDF */
+                body{ background:#ffffff; color:#111111; font-family: 'Courier New', Courier, monospace; }
+                p, td, th, li, span, div { color: #111111 !important; }
+                h1 { color: #0077cc !important; }
+                h2 { color: #4facfe !important; }
+                h3 { color: #c471ed !important; }
+                table { border-collapse: collapse; width: 100%; }
+                th { color: #111111 !important; font-weight: 700; }
+                .detail-section h3 { color: #c471ed !important; }
+                /* Eliminar fondos grises y sombras en elementos tipo glass */
+                .glass-card, .glass-table, .detail-section, .blob, .stat-card, .modal, .modal-overlay {
+                    background: transparent !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                }
+                /* Asegurar filas y celdas sin fondo */
+                table tr, table td, table th { background: transparent !important; }
+                .pdf-fit .detail-section { background: transparent !important; padding: 4px 0 !important; }
+                /* Estilos compactos para intentar que todo quepa en una sola hoja */
+                .pdf-fit { font-size: 12px; line-height: 1.15; }
+                .pdf-fit h1 { font-size: 18px; }
+                .pdf-fit h2 { font-size: 14px; }
+                .pdf-fit h3 { font-size: 12px; }
+                .pdf-fit .detail-section { margin-bottom: 6px; padding: 6px 0; }
+                .pdf-fit table th, .pdf-fit table td { font-size: 11px; padding: 6px 8px; }
+                .pdf-fit img { max-height: 48px; }
+                    /* Mejor renderizado de texto */
+                    html, body, .detail-content, .pdf-fit { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
+            </style>
+        `;
         
-        // Cabecera del PDF
-        pdfContainer.innerHTML = `
-            <div style="border-bottom: 2px solid #4facfe; padding-bottom: 15px; margin-bottom: 20px;">
-                <h1 style="color: #4facfe; margin: 0;">🛠️ TechFix CRM</h1>
-                <h2 style="color: #ffffff; margin: 5px 0 0 0;">Reporte de Orden de Servicio #${order.id}</h2>
-                <p style="color: #a0aec0; margin: 5px 0 0 0;">Estado: ${order.status}</p>
+        // Cabecera del PDF con logo
+        pdfContainer.innerHTML = pdfInlineStyles + `
+            <div style="display:flex; align-items:center; gap:16px; border-bottom: 2px solid #4facfe; padding-bottom: 15px; margin-bottom: 20px;">
+                <div style="flex:0 0 auto;">
+                    <img src="assets/logo.png" alt="logo" style="height:64px; object-fit:contain; display:block;" onerror="this.style.display='none'">
+                </div>
+                <div style="flex:1 1 auto;">
+                    <h1 style="color: #0077cc; margin: 0; font-size:20px;">🛠️ TechFix CRM</h1>
+                    <h2 style="color: #111111; margin: 5px 0 0 0; font-size:16px;">Reporte de Orden de Servicio #${order.id}</h2>
+                    <p style="color: #555555; margin: 5px 0 0 0;">Estado: ${order.status}</p>
+                </div>
             </div>
         `;
         
         pdfContainer.innerHTML += sourceElement.innerHTML;
 
+        // Calcular escala recomendada para html2canvas en función del devicePixelRatio
+        const _dpr = (window && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+        const _scale = Math.min(3, Math.max(1, _dpr * 2));
+
         const opt = {
-            margin:       0.5,
+            margin:       0.25,
             filename:     `Orden_${order.id}_${order.client.name.replace(/\s+/g, '_')}.pdf`,
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0f1016' },
-            jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+            image:        { type: 'png', quality: 1.0 },
+            html2canvas:  { scale: _scale, useCORS: true, backgroundColor: '#ffffff', logging: false, allowTaint: false },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['avoid-all', 'css'], avoid: ['.detail-section'] }
         };
-        
-        html2pdf().set(opt).from(pdfContainer).save();
+
+        // Añadir clases para reducir tamaño y espaciado y así intentar que quepa en una sola hoja
+        pdfContainer.classList.add('pdf-fit');
+
+        html2pdf().set(opt).from(pdfContainer).save().then(() => {
+            pdfContainer.classList.remove('pdf-fit');
+        }).catch(() => {
+            // En caso de error, remover la clase para no afectar la UI
+            pdfContainer.classList.remove('pdf-fit');
+        });
     };
 }
 

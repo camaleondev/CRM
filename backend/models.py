@@ -2,7 +2,10 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey, Text, Enum, B
 from sqlalchemy.orm import relationship
 import enum
 from .database import Base
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# Hora local del servidor: Bogotá (UTC-5)
+BOGOTA = timezone(timedelta(hours=-5))
 
 class UserRole(str, enum.Enum):
     admin = "admin"
@@ -21,13 +24,16 @@ class User(Base):
     hashed_password = Column(String(255))
     role = Column(Enum(UserRole), default=UserRole.technician)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=BOGOTA))
 
 class Client(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), index=True)
     email = Column(String(100), unique=True, index=True)
+    # Identificación (tipo y número) p.ej. CC, NIT, ID
+    id_type = Column(String(20), nullable=True)
+    id_number = Column(String(100), nullable=True)
     phone = Column(String(20))
     address = Column(String(200))
 
@@ -79,7 +85,7 @@ class Payment(Base):
     payment_method = Column(String(50), default="cash")  # cash or card
     transaction_id = Column(String(100), nullable=True)  # ID externo de la transacción
     paid_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=BOGOTA))
     
     order = relationship("ServiceOrder", back_populates="payments")
 
@@ -95,4 +101,4 @@ class AccountingEntry(Base):
     amount = Column(Float, nullable=False)
     description = Column(Text, nullable=True)
     payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)  # Link a pago
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=BOGOTA))

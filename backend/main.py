@@ -4,10 +4,26 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
+
+# Zona horaria local del servidor: Bogotá (UTC-5)
+BOGOTA = timezone(timedelta(hours=-5))
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 import openpyxl
+import os
+from fastapi.staticfiles import StaticFiles
+
+# PDF generation
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
+except Exception:
+    # reportlab may not be installed in dev env; endpoint will fail until package is installed
+    A4 = None
+    canvas = None
+    ImageReader = None
 
 from . import models
 from . import schemas
@@ -42,6 +58,11 @@ db = next(get_db())
 create_default_admin(db)
 
 app = FastAPI(title="CRM Tech Service API 🚀")
+
+# Servir frontend estático (index.html y assets)
+frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
+if os.path.isdir(frontend_dir):
+    app.mount('/', StaticFiles(directory=frontend_dir, html=True), name='frontend')
 
 
 @app.exception_handler(RequestValidationError)
@@ -448,6 +469,73 @@ def accounting_report_export(year: int, month: int, current_user: models.User = 
     filename = f"reporte_contable_{year}_{month}.xlsx"
     return StreamingResponse(bio, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={"Content-Disposition": f"attachment; filename={filename}"})
 
+
+@app.get("/accounting/report/{year}/{month}/export/pdf")
+def accounting_report_export_pdf(year: int, month: int, current_user: models.User = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    """Genera un PDF simple del reporte del mes e incluye el logo si está disponible."""
+    if canvas is None:
+        raise HTTPException(status_code=500, detail="Dependencia 'reportlab' no está instalada en el servidor.")
+
+    report = accounting_report(year, month, current_user, db)
+
+    bio = BytesIO()
+    c = canvas.Canvas(bio, pagesize=A4)
+    page_w, page_h = A4
+
+    # Intentar cargar logo desde frontend/assets/logo.png (ruta relativa al proyecto)
+    logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'assets', 'logo.png'))
+    y_cursor = page_h - 50
+    if os.path.exists(logo_path):
+        try:
+            img = ImageReader(logo_path)
+            iw, ih = img.getSize()
+            max_w = page_w - 100
+            scale = min(1.0, max_w / iw)
+            draw_w = iw * scale
+            draw_h = ih * scale
+            c.drawImage(img, 50, y_cursor - draw_h, width=draw_w, height=draw_h, preserveAspectRatio=True)
+            y_cursor = y_cursor - draw_h - 20
+        except Exception:
+            y_cursor = y_cursor - 40
+    else:
+        y_cursor = y_cursor - 40
+
+    # Título
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, y_cursor, f"Reporte Contable - {month}/{year}")
+    y_cursor -= 28
+
+    c.setFont("Helvetica", 10)
+    # Encabezado simple
+    headers = ["ID", "Tipo", "Categoría", "Descripción", "Monto", "Pago ID", "Método Pago", "Fecha"]
+    # Dibujar filas (texto truncado para evitar overflow)
+    for e in report['entries']:
+        tipo = 'Ingreso' if e['entry_type'] == models.AccountingEntryType.income else 'Gasto'
+        row_text = f"{e['id']} | {tipo} | {e['category'] or ''} | {e['description'] or ''} | {float(e['amount'] or 0):.2f} | {e.get('payment_method') or ''} | {e['created_at'] or ''}"
+        # Truncar si es muy largo
+        if len(row_text) > 220:
+            row_text = row_text[:217] + '...'
+        c.drawString(50, y_cursor, row_text)
+        y_cursor -= 14
+        if y_cursor < 80:
+            c.showPage()
+            y_cursor = page_h - 50
+
+    # Totales
+    y_cursor -= 10
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y_cursor, f"Total Ingresos: {report['income']}")
+    y_cursor -= 16
+    c.drawString(50, y_cursor, f"Total Gastos: {report['expense']}")
+    y_cursor -= 16
+    c.drawString(50, y_cursor, f"Neto: {report['net']}")
+
+    c.save()
+    bio.seek(0)
+
+    filename = f"reporte_contable_{year}_{month}.pdf"
+    return StreamingResponse(bio, media_type='application/pdf', headers={"Content-Disposition": f"attachment; filename={filename}"})
+
 @app.delete("/accounting/{entry_id}")
 def delete_accounting_entry(
     entry_id: int,
@@ -661,7 +749,7 @@ def process_payment(
         transaction_id = "CASH_" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
         db_payment.status = models.PaymentStatus.completed
         db_payment.transaction_id = transaction_id
-        db_payment.paid_at = datetime.utcnow()
+        db_payment.paid_at = datetime.now(tz=BOGOTA)
         
     elif db_payment.payment_method == "card":
         # Pago con tarjeta: no requerimos datos en el frontend (casilla)
@@ -669,7 +757,7 @@ def process_payment(
         transaction_id = "CARD_" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
         db_payment.status = models.PaymentStatus.completed
         db_payment.transaction_id = transaction_id
-        db_payment.paid_at = datetime.utcnow()
+        db_payment.paid_at = datetime.now(tz=BOGOTA)
     
     db.commit()
     db.refresh(db_payment)

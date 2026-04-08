@@ -51,6 +51,8 @@ class ClientBase(BaseModel):
     email: str
     phone: Optional[str] = None
     address: Optional[str] = None
+    id_type: Optional[str] = None
+    id_number: Optional[str] = None
 
 class ClientCreate(ClientBase):
     pass
