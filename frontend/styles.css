@@ -863,7 +863,28 @@ select option {
   }
 
   .user-profile {
+    display: flex;
+    margin-left: auto;
+    align-items: center;
+    gap: 8px;
+    padding-left: 0.5rem;
+  }
+
+  /* Mostrar solo avatar + botón en pantallas pequeñas para ahorrar espacio */
+  .user-profile .name,
+  .user-profile .role {
     display: none;
+  }
+
+  .user-profile .avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+
+  .user-profile .logout-btn {
+    padding: 6px 10px;
+    font-size: 0.9rem;
   }
 
   .main-content {
