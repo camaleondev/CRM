@@ -809,3 +809,99 @@ select option {
 #change-password-form .btn-primary:hover {
   transform: translateY(-2px);
 }
+
+/* Responsive adjustments for tablets and mobile */
+@media (max-width: 1024px) {
+  .app-container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  body.dark-theme {
+    overflow: auto;
+  }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    gap: 0.5rem;
+    border-right: none;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .logo {
+    padding: 0 1rem;
+    border-bottom: none;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo .brand-logo { width: 120px; }
+
+  .logo h2 {
+    font-size: 1.05rem;
+  }
+
+  .nav-links {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 0 0.5rem;
+  }
+
+  .nav-item {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.95rem;
+    border-left: none;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+
+  .user-profile {
+    display: none;
+  }
+
+  .main-content {
+    padding: 1rem;
+  }
+
+  .view-header h1 {
+    font-size: 1.4rem;
+  }
+
+  .stats-grid {
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .stat-info p {
+    font-size: 1.2rem;
+    white-space: normal;
+  }
+
+  .inventory-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
+  }
+
+  .modal {
+    max-width: 92%;
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .logo .brand-logo { width: 110px; }
+  .view-header p { display: none; }
+  .view-header { align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .btn-primary { padding: 0.6rem 1rem; font-size: 0.95rem; }
+  .stat-icon { font-size: 2rem; }
+  .inv-emoji { font-size: 3rem; }
+  table th, table td { padding: 0.6rem 0.8rem; }
+  .modal.modal-large { max-width: 96%; padding: 0.8rem; }
+}
