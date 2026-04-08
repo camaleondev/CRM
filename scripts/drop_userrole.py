@@ -13,7 +13,25 @@ if not url:
 
 print('Connecting to', url[:50])
 # psycopg2 accepts 'postgres://' URLs
-conn = psycopg2.connect(url)
+try:
+    # Ensure SSL is used (Heroku requires SSL) and set a timeout
+    conn = psycopg2.connect(url, connect_timeout=10, sslmode='require')
+    conn.autocommit = True
+    cur = conn.cursor()
+    print('Connected, executing DROP')
+    try:
+        cur.execute('DROP TYPE IF EXISTS userrole;')
+        print('Dropped type userrole (if existed)')
+    except Exception as e:
+        print('Error executing DROP:', repr(e))
+        sys.exit(3)
+    finally:
+        cur.close()
+        conn.close()
+        print('Connection closed')
+except Exception as e:
+    print('Connection error:', repr(e))
+    sys.exit(2)
 conn.autocommit = True
 cur = conn.cursor()
 try:

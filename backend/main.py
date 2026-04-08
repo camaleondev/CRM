@@ -67,8 +67,23 @@ def create_default_admin(db: Session):
         db.add(admin_user)
         db.commit()
 
-db = next(get_db())
-create_default_admin(db)
+# Inicialización de la base de datos en el evento `startup` en lugar
+# de ejecutarla en tiempo de importación. Evita errores cuando el
+# servicio aún no puede conectarse a la base de datos en Heroku.
+def _init_db_default_admin():
+    try:
+        db = next(get_db())
+        create_default_admin(db)
+    except Exception as e:
+        # No detengas la aplicación por errores temporales de conexión;
+        # el mensaje se registra y la inicialización puede intentarse en
+        # futuros arranques o manualmente.
+        print('Warning: No se pudo crear el admin por defecto en startup:', e)
+
+
+@app.on_event("startup")
+def on_startup():
+    _init_db_default_admin()
 
 app = FastAPI(title="CRM Tech Service API 🚀", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
