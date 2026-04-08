@@ -27,7 +27,7 @@ except Exception:
 
 from . import models
 from . import schemas
-from .database import engine, get_db
+from .database import engine, get_db, SessionLocal
 from .auth import (
     authenticate_user, 
     create_access_token, 
@@ -43,16 +43,11 @@ from .auth import (
 # para evitar que el proceso se caiga en arranques posteriores.
 from sqlalchemy.exc import IntegrityError
 
-try:
-    models.Base.metadata.create_all(bind=engine)
-except IntegrityError as ie:
-    err = str(ie).lower()
-    if 'pg_type_typname_nsp_index' in err or 'duplicate key value violates unique constraint' in err:
-        # Loguear y continuar; la DB ya contiene algunos tipos ENUM
-        print('Warning: Ignored IntegrityError during create_all (possible existing ENUMs):', ie)
-    else:
-        # Re-raise otros errores
-        raise
+
+# Intentaremos conectar y crear tablas con reintentos para entornos
+# donde la base de datos puede tardar en estar disponible (p.e. Heroku).
+import time
+
 
 # Crear usuario admin por defecto
 def create_default_admin(db: Session):
@@ -70,15 +65,46 @@ def create_default_admin(db: Session):
 # Inicialización de la base de datos en el evento `startup` en lugar
 # de ejecutarla en tiempo de importación. Evita errores cuando el
 # servicio aún no puede conectarse a la base de datos en Heroku.
-def _init_db_default_admin():
-    try:
-        db = next(get_db())
-        create_default_admin(db)
-    except Exception as e:
-        # No detengas la aplicación por errores temporales de conexión;
-        # el mensaje se registra y la inicialización puede intentarse en
-        # futuros arranques o manualmente.
-        print('Warning: No se pudo crear el admin por defecto en startup:', e)
+def _init_db_default_admin(max_retries: int = 5, initial_delay: float = 2.0):
+    """Intentar crear tablas y el admin por defecto con reintentos.
+
+    - Intenta conectar al engine y ejecutar `create_all`.
+    - Luego crea el admin por defecto usando `SessionLocal`.
+    - Si falla, reintenta con backoff exponencial hasta `max_retries`.
+    """
+    delay = initial_delay
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Probar conexión rápida
+            conn = engine.connect()
+            conn.close()
+
+            # Crear tablas (es seguro volver a ejecutarlo)
+            try:
+                models.Base.metadata.create_all(bind=engine)
+            except IntegrityError as ie:
+                err = str(ie).lower()
+                if 'pg_type_typname_nsp_index' in err or 'duplicate key value violates unique constraint' in err:
+                    print('Warning: Ignored IntegrityError during create_all (possible existing ENUMs):', ie)
+                else:
+                    raise
+
+            # Crear admin por defecto usando SessionLocal
+            db = SessionLocal()
+            try:
+                create_default_admin(db)
+            finally:
+                db.close()
+
+            print('Database initialized successfully on attempt', attempt)
+            return
+        except Exception as e:
+            print(f"DB init attempt {attempt} failed: {e}")
+            if attempt == max_retries:
+                print('Max retries reached; database initialization skipped.')
+                return
+            time.sleep(delay)
+            delay *= 2
 
 
 app = FastAPI(title="CRM Tech Service API 🚀", docs_url="/api/docs", openapi_url="/api/openapi.json")
